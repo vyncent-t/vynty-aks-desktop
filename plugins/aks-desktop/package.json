@@ -52,11 +52,9 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@types/jest": "^30.0.0",
     "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
     "babel-jest": "^30.1.2",
     "identity-obj-proxy": "^3.0.0",
-    "jest": "^30.1.3",
-    "react-dom": "^19.2.0"
+    "jest": "^30.1.3"
   },
   "optionalDependencies": {
     "@rollup/rollup-darwin-arm64": "^4.52.4",
