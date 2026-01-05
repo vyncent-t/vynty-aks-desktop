@@ -30,8 +30,8 @@ import { MetricsTab } from './components/MetricsTab';
 import ScalingCard from './components/Scaling/ScalingCard';
 import { ScalingTab } from './components/ScalingTab';
 import { getLoginStatus } from './utils/azure/az-cli';
-import { azureTheme } from './utils/shared';
 import { isAksProject } from './utils/shared/isAksProject';
+import { azureTheme } from './utils/shared/theme';
 
 Headlamp.setAppMenu(menus => {
   // Find the Help menu
