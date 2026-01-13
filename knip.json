@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "entry": [
+    "plugins/aks-desktop/src/index.tsx"
+  ],
+  "ignoreIssues": {
+    "build/setup-plugins.ts": [
+      "files"
+    ],
+    "build/verify-bundled-tools.ts": [
+      "files"
+    ]
+  },
+  "project": [
+    "build/**/*.ts",
+    "plugins/aks-desktop/src/**/*.{ts,tsx}",
+    "plugins/aks-desktop/test-config/**/*.{js,ts}",
+    "plugins/aks-desktop/src/utils/test/**/*.{js,ts,tsx}"
+  ],
+  "ignore": [
+    "headlamp/.plugins/**",
+    "headlamp/app/resources/**",
+    "plugins/aks-desktop/dist/**"
+  ],
+  "ignoreExportsUsedInFile": {
+    "interface": true,
+    "type": true
+  },
+  "jest": [
+    "plugins/aks-desktop/test-config/jest/*.js"
+  ],
+  "lint-staged": true,
+  "husky": true,
+  "tags": [
+    "-lintignore"
+  ]
+}
