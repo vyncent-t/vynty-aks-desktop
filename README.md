@@ -39,7 +39,7 @@ To run AKS desktop locally, follow these steps:
 
 4. Check for Resource folder:
    Ensure that the `resources` folder exists in the `Headlamp/app` directory.
-   **If it does not exist**, use the following command **at the root dir**:
+   **If it does not exist**, use the following command **at the root directory**:
 
    ```bash
    npm run plugin:setup
