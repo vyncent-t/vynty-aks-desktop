@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0.
 
 import { useMemo } from 'react';
-import type { Deployment } from './useDeployments';
+import type { DeploymentInfo } from './useDeployments';
 import type { HPAInfo } from './useHPAInfo';
 
 export interface ChartDataPoint {
@@ -17,7 +17,7 @@ export interface ChartDataPoint {
  */
 export const useChartData = (
   selectedDeployment: string,
-  deployments: Deployment[],
+  deployments: DeploymentInfo[],
   hpaInfo: HPAInfo | null
 ): ChartDataPoint[] => {
   return useMemo(() => {

@@ -3,11 +3,11 @@
 
 import { CircularProgress, FormControl, InputLabel, MenuItem, Select } from '@mui/material';
 import React from 'react';
-import type { Deployment } from '../hooks/useDeployments';
+import type { DeploymentInfo } from '../hooks/useDeployments';
 
 interface DeploymentSelectorProps {
   selectedDeployment: string;
-  deployments: Deployment[];
+  deployments: DeploymentInfo[];
   loading: boolean;
   onDeploymentChange: (deploymentName: string) => void;
 }
