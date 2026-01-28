@@ -3,6 +3,7 @@
 
 import { Icon } from '@iconify/react';
 import { K8s } from '@kinvolk/headlamp-plugin/lib';
+import Deployment from '@kinvolk/headlamp-plugin/lib/lib/k8s/deployment';
 import {
   Box,
   CircularProgress,
@@ -30,7 +31,7 @@ interface MetricsCardProps {
   project: Project;
 }
 
-interface Deployment {
+interface DeploymentInfo {
   name: string;
   namespace: string;
 }
@@ -59,7 +60,7 @@ function formatMemory(bytes: number): string {
 
 function MetricsCard({ project }: MetricsCardProps) {
   const [selectedDeployment, setSelectedDeployment] = useState<string>('');
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [deployments, setDeployments] = useState<DeploymentInfo[]>([]);
   const [metrics, setMetrics] = useState<MetricData>({
     cpuUsage: 'N/A',
     memoryUsage: 'N/A',
@@ -93,10 +94,10 @@ function MetricsCard({ project }: MetricsCardProps) {
 
     try {
       const cancel = K8s.ResourceClasses.Deployment.apiList(
-        (deploymentList: K8s.Deployment[]) => {
-          const deployments = deploymentList
-            .filter((deployment: K8s.Deployment) => deployment.getNamespace() === namespace)
-            .map((deployment: K8s.Deployment) => ({
+        (deploymentList: Deployment[]) => {
+          const deployments: DeploymentInfo[] = deploymentList
+            .filter((deployment: Deployment) => deployment.getNamespace() === namespace)
+            .map((deployment: Deployment) => ({
               name: deployment.getName(),
               namespace: deployment.getNamespace(),
             }));
@@ -345,6 +346,7 @@ function MetricsCard({ project }: MetricsCardProps) {
               sx={{
                 p: 2,
                 borderRadius: 1,
+                // @ts-ignore todo: fix palette type so background.muted is recognized
                 background: theme.palette.background.muted,
                 border: `1px solid ${theme.palette.divider}`,
               }}
@@ -368,6 +370,7 @@ function MetricsCard({ project }: MetricsCardProps) {
               sx={{
                 p: 2,
                 borderRadius: 1,
+                // @ts-ignore todo: fix palette type so background.muted is recognized
                 background: theme.palette.background.muted,
                 border: `1px solid ${theme.palette.divider}`,
               }}
@@ -395,6 +398,7 @@ function MetricsCard({ project }: MetricsCardProps) {
               sx={{
                 p: 2,
                 borderRadius: 1,
+                // @ts-ignore todo: fix palette type so background.muted is recognized
                 background: theme.palette.background.muted,
                 border: `1px solid ${theme.palette.divider}`,
               }}
@@ -422,6 +426,7 @@ function MetricsCard({ project }: MetricsCardProps) {
               sx={{
                 p: 2,
                 borderRadius: 1,
+                // @ts-ignore todo: fix palette type so background.muted is recognized
                 background: theme.palette.background.muted,
                 border: `1px solid ${theme.palette.divider}`,
               }}

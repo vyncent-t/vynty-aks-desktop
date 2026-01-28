@@ -3,12 +3,12 @@
 
 import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';
-import type { Deployment } from '../hooks/useDeployments';
+import type { DeploymentInfo } from '../hooks/useDeployments';
 import type { HPAInfo } from '../hooks/useHPAInfo';
 
 interface ScalingMetricsProps {
   selectedDeployment: string;
-  deployments: Deployment[];
+  deployments: DeploymentInfo[];
   hpaInfo: HPAInfo | null;
 }
 

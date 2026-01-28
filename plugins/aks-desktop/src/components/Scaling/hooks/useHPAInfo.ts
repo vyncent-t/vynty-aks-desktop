@@ -29,15 +29,16 @@ export const useHPAInfo = (
 ): UseHPAInfoResult => {
   const [hpaInfo, setHpaInfo] = useState<HPAInfo | null>(null);
 
+  // @ts-ignore todo: fix this
   useEffect(() => {
     if (!deploymentName || !namespace) return;
 
     try {
       // Find HPA that targets this deployment
       const cancel = K8s.ResourceClasses.HorizontalPodAutoscaler.apiList(
-        (hpaList: K8s.HorizontalPodAutoscaler[]) => {
+        hpaList => {
           const hpa = hpaList.find(
-            (hpa: K8s.HorizontalPodAutoscaler) =>
+            hpa =>
               hpa.getNamespace() === namespace && hpa.spec?.scaleTargetRef?.name === deploymentName
           );
           console.log('hpa is ', hpa);

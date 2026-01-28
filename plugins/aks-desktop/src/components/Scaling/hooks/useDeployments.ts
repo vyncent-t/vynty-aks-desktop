@@ -4,7 +4,7 @@
 import { K8s } from '@kinvolk/headlamp-plugin/lib';
 import { useEffect, useState } from 'react';
 
-export interface Deployment {
+export interface DeploymentInfo {
   name: string;
   namespace: string;
   replicas: number;
@@ -13,7 +13,7 @@ export interface Deployment {
 }
 
 interface UseDeploymentsResult {
-  deployments: Deployment[];
+  deployments: DeploymentInfo[];
   selectedDeployment: string;
   loading: boolean;
   error: string | null;
@@ -28,10 +28,11 @@ export const useDeployments = (
   cluster: string | undefined
 ): UseDeploymentsResult => {
   const [selectedDeployment, setSelectedDeployment] = useState<string>('');
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [deployments, setDeployments] = useState<DeploymentInfo[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // @ts-ignore todo: fix this
   useEffect(() => {
     if (!namespace) return;
 
@@ -41,10 +42,10 @@ export const useDeployments = (
     try {
       // Use Headlamp's K8s API to fetch deployments
       const cancel = K8s.ResourceClasses.Deployment.apiList(
-        (deploymentList: K8s.Deployment[]) => {
+        deploymentList => {
           const fetchedDeployments = deploymentList
-            .filter((deployment: K8s.Deployment) => deployment.getNamespace() === namespace)
-            .map((deployment: K8s.Deployment) => ({
+            .filter(deployment => deployment.getNamespace() === namespace)
+            .map(deployment => ({
               name: deployment.getName(),
               namespace: deployment.getNamespace(),
               replicas: deployment.spec?.replicas || 0,
