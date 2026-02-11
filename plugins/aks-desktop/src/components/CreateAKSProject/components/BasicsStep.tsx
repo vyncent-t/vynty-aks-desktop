@@ -191,7 +191,9 @@ export const BasicsStep: React.FC<BasicsStepProps> = ({
           type="error"
           message={
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Typography variant="h6">Feature Flag Required</Typography>
+              <Typography variant="h6" component="div">
+                Feature Flag Required
+              </Typography>
               <Typography variant="body2">
                 The ManagedNamespacePreview feature must be registered to create managed namespaces.
               </Typography>
