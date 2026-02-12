@@ -72,7 +72,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({ formData, subscriptions,
         {/* Networking and Compute Quota Side by Side */}
         <Grid item xs={12} md={6}>
           <Card variant="outlined" sx={{ p: 2, mb: 2, height: '200px' }}>
-            <Typography variant="h6" gutterBottom sx={sectionTitleSx}>
+            <Typography variant="h6" component="h3" gutterBottom sx={sectionTitleSx}>
               <Icon icon="mdi:network" style={{ marginRight: 8, verticalAlign: 'middle' }} />
               Networking Policies
             </Typography>
