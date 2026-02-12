@@ -168,7 +168,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({ formData, subscriptions,
         {/* Access Section with Scroll */}
         <Grid item xs={12}>
           <Card variant="outlined" sx={{ p: 2, mb: 2 }}>
-            <Typography variant="h6" gutterBottom sx={sectionTitleSx}>
+            <Typography variant="h6" component="h3" gutterBottom sx={sectionTitleSx}>
               <Icon icon="mdi:account-group" style={{ marginRight: 8, verticalAlign: 'middle' }} />
               Access Control ({formData.userAssignments.length} assignee
               {formData.userAssignments.length !== 1 ? 's' : ''})
