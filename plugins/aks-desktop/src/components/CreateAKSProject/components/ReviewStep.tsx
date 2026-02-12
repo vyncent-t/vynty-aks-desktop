@@ -30,7 +30,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({ formData, subscriptions,
         {/* Basics Section */}
         <Grid item xs={12}>
           <Card variant="outlined" sx={{ p: 2, mb: 2 }}>
-            <Typography variant="h6" gutterBottom sx={sectionTitleSx}>
+            <Typography variant="h6" component="h3" gutterBottom sx={sectionTitleSx}>
               <Icon icon="mdi:project" style={{ marginRight: 8, verticalAlign: 'middle' }} />
               Project Basics
             </Typography>
