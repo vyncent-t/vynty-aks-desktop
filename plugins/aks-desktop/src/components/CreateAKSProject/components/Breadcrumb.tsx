@@ -15,6 +15,8 @@ export const Breadcrumb: React.FC<BreadcrumbProps> = ({ steps, activeStep, onSte
 
   return (
     <Box
+      role="tablist"
+      aria-label="Project creation steps"
       sx={{
         width: '100%',
         borderBottom: `1px solid ${theme.palette.divider}`,
@@ -31,13 +33,28 @@ export const Breadcrumb: React.FC<BreadcrumbProps> = ({ steps, activeStep, onSte
       {steps.map((label, index) => (
         <React.Fragment key={index}>
           <Box
+            role="tab"
+            tabIndex={0}
+            aria-selected={index === activeStep}
+            aria-label={`Step ${index + 1}: ${label}`}
             onClick={() => onStepClick(index)}
+            onKeyDown={(e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onStepClick(index);
+              }
+            }}
             sx={{
               display: 'flex',
               alignItems: 'center',
               cursor: 'pointer',
               transition: 'all 0.2s ease',
               '&:hover': { opacity: 0.8 },
+              '&:focus-visible': {
+                outline: `2px solid ${theme.palette.primary.main}`,
+                outlineOffset: '2px',
+                borderRadius: '4px',
+              },
             }}
           >
             <Box
