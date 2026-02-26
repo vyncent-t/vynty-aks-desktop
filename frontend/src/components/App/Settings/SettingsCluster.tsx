@@ -465,6 +465,7 @@ export default function SettingsCluster() {
                     }
                     autoComplete="off"
                     inputProps={{
+                      'aria-labelledby': allowedNamespaceLabelID,
                       form: {
                         autocomplete: 'off',
                       },

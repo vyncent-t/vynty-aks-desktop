@@ -305,6 +305,7 @@
                 <input
                   aria-describedby=":mock-test-id:"
                   aria-invalid="false"
+                  aria-labelledby="allowed-namespace-label"
                   autocomplete="off"
                   class="MuiInputBase-input MuiOutlinedInput-input MuiInputBase-inputSizeSmall MuiInputBase-inputAdornedEnd css-19qh8xo-MuiInputBase-input-MuiOutlinedInput-input"
                   form="[object Object]"
