@@ -5,7 +5,7 @@ import { Icon } from '@iconify/react';
 import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { TextField } from '@mui/material';
 import { Box, Button, FormControl, Grid, IconButton, MenuItem, Typography } from '@mui/material';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import type { AccessStepProps, UserAssignment } from '../types';
 import { AVAILABLE_ROLES, ROLE_DESCRIPTIONS } from '../types';
 import { isValidEmail } from '../validators';
@@ -20,6 +20,19 @@ export const AccessStep: React.FC<AccessStepProps> = ({
   loading = false,
 }) => {
   const { t } = useTranslation();
+  const lastAssigneeRef = useRef<HTMLInputElement>(null);
+  const prevCountRef = useRef(formData.userAssignments.length);
+
+  // Focus on the new assignment field when it is added
+  useEffect(() => {
+    if (formData.userAssignments.length > prevCountRef.current) {
+      requestAnimationFrame(() => {
+        lastAssigneeRef.current?.focus();
+      });
+    }
+    prevCountRef.current = formData.userAssignments.length;
+  }, [formData.userAssignments.length]);
+
   const handleAssignmentChange = (index: number, field: keyof UserAssignment, value: string) => {
     const updatedAssignments = [...formData.userAssignments];
     updatedAssignments[index] = { ...updatedAssignments[index], [field]: value };
@@ -73,6 +86,9 @@ export const AccessStep: React.FC<AccessStepProps> = ({
                       : !isValidEmail(assignment.email.trim())
                       ? t('Please enter a valid email address')
                       : ''
+                  }
+                  inputRef={
+                    idx === formData.userAssignments.length - 1 ? lastAssigneeRef : undefined
                   }
                 />
               </FormControl>
