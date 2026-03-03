@@ -151,6 +151,8 @@ export interface FormFieldProps {
   required?: boolean;
   startAdornment?: React.ReactNode;
   endAdornment?: React.ReactNode;
+  /** Ref for the input elemenet of this field */
+  inputRef?: React.Ref<HTMLInputElement>;
 }
 
 export interface ValidationAlertProps {

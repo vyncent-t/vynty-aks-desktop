@@ -23,6 +23,7 @@ export const FormField: React.FC<FormFieldProps> = ({
   required = false,
   startAdornment,
   endAdornment,
+  inputRef,
 }) => {
   const theme = useTheme();
 
@@ -63,6 +64,7 @@ export const FormField: React.FC<FormFieldProps> = ({
       disabled={disabled}
       required={required}
       fullWidth
+      inputRef={inputRef}
       sx={{
         '& .MuiOutlinedInput-root': {
           '& fieldset': {
