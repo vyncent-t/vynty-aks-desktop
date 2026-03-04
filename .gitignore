@@ -449,3 +449,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Old translation files
+**/locales/**/*_old.json
