@@ -24,6 +24,7 @@ import AzureProfilePage from './components/AzureAuth/AzureProfilePage';
 import ClusterCapabilityCard from './components/ClusterCapabilityCard/ClusterCapabilityCard';
 import ConfigurePipelineButton from './components/ConfigurePipeline/ConfigurePipelineButton';
 import CreateAKSProject from './components/CreateAKSProject/CreateAKSProject';
+import CreateProjectFromNamespace from './components/CreateProjectFromNamespace/CreateProjectFromNamespace';
 import AKSProjectDeleteButton from './components/DeleteAKSProject/AKSProjectDeleteButton';
 import DeployButton from './components/Deploy/DeployButton';
 import PipelineCard from './components/Deployments/PipelineCard';
@@ -246,6 +247,29 @@ if (Headlamp.isRunningAsApp()) {
     description: 'Import managed namespaces and regular namespaces as AKS Desktop projects',
     component: () => <Redirect to="/projects/import-aks-projects" />,
     icon: 'mdi:import',
+  });
+
+  // register route for create project from existing namespace
+  registerRoute({
+    path: '/projects/create-from-namespace',
+    component: CreateProjectFromNamespace,
+    name: 'Create Project from Namespace',
+    sidebar: {
+      sidebar: 'HOME',
+      item: 'projects',
+    },
+    exact: true,
+    noAuthRequired: true,
+    useClusterURL: false,
+  });
+
+  // register create project from existing namespace option
+  registerCustomCreateProject({
+    id: 'aks-from-namespace',
+    name: 'AKS project from existing namespace',
+    description: 'Convert an existing AKS managed namespace into a project',
+    component: () => <Redirect to="/projects/create-from-namespace" />,
+    icon: 'mdi:folder-swap-outline',
   });
 
   // Register AKS as a cluster provider in the "Add Cluster" page
