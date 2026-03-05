@@ -14,6 +14,7 @@ import {
   Typography,
 } from '@mui/material';
 import React from 'react';
+import type { DiscoveredNamespace } from '../../../hooks/useNamespaceDiscovery';
 import {
   PROJECT_ID_LABEL,
   PROJECT_MANAGED_BY_LABEL,
@@ -22,11 +23,7 @@ import {
   SUBSCRIPTION_LABEL,
 } from '../../../utils/constants/projectLabels';
 
-interface NamespaceInfo {
-  name: string;
-  clusterName: string;
-  isManagedNamespace: boolean;
-}
+type NamespaceInfo = Pick<DiscoveredNamespace, 'name' | 'clusterName' | 'isManagedNamespace'>;
 
 interface ConversionDialogProps {
   open: boolean;

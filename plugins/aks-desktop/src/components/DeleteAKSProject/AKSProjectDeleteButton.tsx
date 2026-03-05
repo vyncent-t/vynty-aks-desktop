@@ -33,14 +33,8 @@ interface ProjectDefinition {
   clusters: string[];
 }
 
-interface ButtonStyle {
-  variant?: 'text' | 'outlined' | 'contained';
-  color?: 'inherit' | 'primary' | 'secondary' | 'success' | 'error' | 'info' | 'warning';
-}
-
 interface AKSProjectDeleteButtonProps {
   project: ProjectDefinition;
-  buttonStyle?: ButtonStyle;
 }
 
 const AKSProjectDeleteButton: React.FC<AKSProjectDeleteButtonProps> = ({ project }) => {

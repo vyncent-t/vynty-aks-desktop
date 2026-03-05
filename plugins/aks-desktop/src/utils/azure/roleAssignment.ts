@@ -4,6 +4,9 @@
 import { mapUIRoleToAzureRole, UserAssignment } from '../../components/CreateAKSProject/types';
 import { createNamespaceRoleAssignment, verifyNamespaceAccess } from './az-cli';
 
+const AKS_NAMESPACE_USER_ROLE = 'Azure Kubernetes Service Namespace User';
+const AKS_NAMESPACE_CONTRIBUTOR_ROLE = 'Azure Kubernetes Service Namespace Contributor';
+
 export interface AssignRolesOptions {
   clusterName: string;
   resourceGroup: string;
@@ -63,11 +66,7 @@ export async function assignRolesToNamespace(
     try {
       const azureRole = mapUIRoleToAzureRole(assignment.role);
 
-      const rolesToAssign = [
-        azureRole,
-        'Azure Kubernetes Service Namespace User',
-        'Azure Kubernetes Service Namespace Contributor',
-      ];
+      const rolesToAssign = [azureRole, AKS_NAMESPACE_USER_ROLE, AKS_NAMESPACE_CONTRIBUTOR_ROLE];
 
       const roleResults: Array<{
         role: string;

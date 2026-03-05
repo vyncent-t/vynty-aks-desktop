@@ -4,7 +4,15 @@
 import { Icon } from '@iconify/react';
 import { K8s, useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { PageGrid, SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { Box, Button, Card, CardContent, CircularProgress, Typography } from '@mui/material';
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  CircularProgress,
+  TextField,
+  Typography,
+} from '@mui/material';
 import React, { useEffect, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { checkNamespaceExists, createManagedNamespace } from '../../utils/azure/az-cli';
@@ -179,8 +187,9 @@ function CreateAKSProject() {
       setCreationProgress(`${t('Starting project creation')}...`);
 
       // Add timeout protection (10 minutes)
+      let timeoutId: ReturnType<typeof setTimeout>;
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
           reject(
             new Error(
               t(
@@ -340,7 +349,11 @@ function CreateAKSProject() {
       })();
 
       // Race between creation and timeout
-      await Promise.race([creationPromise, timeoutPromise]);
+      try {
+        await Promise.race([creationPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timeoutId!);
+      }
 
       // Wait a moment to show success message
       setTimeout(() => {
@@ -603,18 +616,13 @@ function CreateAKSProject() {
                       )}
                     </Typography>
                     <Box sx={{ mb: 3 }}>
-                      <input
-                        type="text"
+                      <TextField
+                        fullWidth
+                        size="small"
                         value={applicationName}
                         onChange={e => setApplicationName(e.target.value)}
                         placeholder={`${t('Enter application name')}...`}
-                        style={{
-                          width: '100%',
-                          padding: '12px',
-                          border: '1px solid #ccc',
-                          borderRadius: '4px',
-                          marginBottom: '8px',
-                        }}
+                        sx={{ mb: 1 }}
                       />
                       <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'left' }}>
                         {t(

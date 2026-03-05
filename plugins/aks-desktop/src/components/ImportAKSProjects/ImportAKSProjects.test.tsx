@@ -357,4 +357,102 @@ describe('ImportAKSProjects', () => {
 
     expect(mockPush).toHaveBeenCalledWith('/');
   });
+
+  test('displays error when cluster registration fails', async () => {
+    const ns = makeDiscoveredNamespace({
+      name: 'ns1',
+      clusterName: 'cluster-a',
+      resourceGroup: 'rg-a',
+      subscriptionId: 'sub-a',
+      isAksProject: false,
+      category: 'needs-conversion',
+    });
+    mockUseNamespaceDiscovery.mockReturnValue(defaultDiscoveryReturn([ns]));
+    mockRegisterAKSCluster.mockResolvedValue({ success: false, message: 'Auth failed' });
+
+    render(<ImportAKSProjects />);
+
+    // Select the namespace
+    const row = screen.getByTestId('row-ns1');
+    const checkbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(checkbox);
+
+    // Click Import Selected -- opens the conversion dialog
+    fireEvent.click(screen.getByText('Import Selected Projects'));
+    fireEvent.click(screen.getByText('Confirm & Import'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Auth failed/)).toBeInTheDocument();
+    });
+  });
+
+  test('calls setClusterSettings after successful import', async () => {
+    const ns = makeDiscoveredNamespace({
+      name: 'ns1',
+      clusterName: 'test-cluster',
+      isAksProject: true,
+      category: 'needs-import',
+    });
+    mockUseNamespaceDiscovery.mockReturnValue(defaultDiscoveryReturn([ns]));
+    mockRegisterAKSCluster.mockResolvedValue({ success: true });
+
+    render(<ImportAKSProjects />);
+
+    // Select the namespace
+    const row = screen.getByTestId('row-ns1');
+    const checkbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(checkbox);
+
+    // Click Import Selected (already a project, no conversion dialog)
+    fireEvent.click(screen.getByText('Import Selected Projects'));
+
+    await waitFor(() => {
+      expect(mockSetClusterSettings).toHaveBeenCalledWith(
+        'test-cluster',
+        expect.objectContaining({
+          allowedNamespaces: expect.arrayContaining(['ns1']),
+        })
+      );
+    });
+  });
+
+  test('handles mixed results with some successes and some failures', async () => {
+    const ns1 = makeDiscoveredNamespace({
+      name: 'ns-ok',
+      clusterName: 'cluster-a',
+      resourceGroup: 'rg-a',
+      subscriptionId: 'sub-a',
+      isAksProject: false,
+      category: 'needs-conversion',
+    });
+    const ns2 = makeDiscoveredNamespace({
+      name: 'ns-fail',
+      clusterName: 'cluster-a',
+      resourceGroup: 'rg-a',
+      subscriptionId: 'sub-a',
+      isAksProject: false,
+      category: 'needs-conversion',
+    });
+    mockUseNamespaceDiscovery.mockReturnValue(defaultDiscoveryReturn([ns1, ns2]));
+    mockRegisterAKSCluster.mockResolvedValue({ success: true });
+    mockApplyProjectLabels
+      .mockResolvedValueOnce(undefined) // ns-ok succeeds
+      .mockRejectedValueOnce(new Error('Forbidden')); // ns-fail fails
+
+    render(<ImportAKSProjects />);
+
+    // Select all namespaces
+    fireEvent.click(screen.getByText('Select All'));
+
+    // Click Import Selected -- opens the conversion dialog
+    fireEvent.click(screen.getByText('Import Selected Projects'));
+    fireEvent.click(screen.getByText('Confirm & Import'));
+
+    await waitFor(() => {
+      // Should show both success and error results
+      expect(screen.getByText(/converted and imported/)).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/permissions/i)).toBeInTheDocument();
+  });
 });

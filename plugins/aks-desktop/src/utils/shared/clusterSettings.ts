@@ -1,30 +1,34 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the Apache 2.0.
 
+export interface ClusterSettings {
+  allowedNamespaces?: string[];
+  [key: string]: unknown;
+}
+
 /**
  * Reads and parses cluster settings from localStorage.
- * Returns a plain object (null-prototype) with the parsed settings,
+ * Returns a plain object with the parsed settings,
  * or an empty object if the key is missing or unparseable.
  */
-export function getClusterSettings(clusterName: string): Record<string, any> {
+export function getClusterSettings(clusterName: string): ClusterSettings {
   try {
     const raw = localStorage.getItem(`cluster_settings.${clusterName}`);
-    const settings: Record<string, any> = Object.create(null);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        Object.assign(settings, parsed);
+        return parsed as ClusterSettings;
       }
     }
-    return settings;
+    return {};
   } catch {
-    return Object.create(null);
+    return {};
   }
 }
 
 /**
  * Writes cluster settings back to localStorage.
  */
-export function setClusterSettings(clusterName: string, settings: Record<string, any>): void {
+export function setClusterSettings(clusterName: string, settings: ClusterSettings): void {
   localStorage.setItem(`cluster_settings.${clusterName}`, JSON.stringify(settings));
 }

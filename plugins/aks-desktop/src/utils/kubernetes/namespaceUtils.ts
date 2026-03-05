@@ -20,11 +20,11 @@ export function fetchNamespaceData(name: string, cluster: string): Promise<KubeN
     const cancelFn = (K8s.ResourceClasses.Namespace.apiEndpoint as ApiClient<KubeNamespace>).get(
       name,
       ns => {
-        cancelFn.then(cancel => cancel());
+        void cancelFn.then(cancel => cancel()).catch(() => {});
         resolve(ns);
       },
       (err: any) => {
-        cancelFn.then(cancel => cancel());
+        void cancelFn.then(cancel => cancel()).catch(() => {});
         reject(new Error(`Failed to fetch namespace: ${err}`));
       },
       {},

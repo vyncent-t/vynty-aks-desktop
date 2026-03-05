@@ -401,8 +401,5 @@ registerProjectHeaderAction({
 // Register custom delete button for AKS projects only
 registerProjectDeleteButton({
   isEnabled: isAksProject,
-  component: ({ project, buttonStyle }) => (
-    // @ts-expect-error AKSProjectDeleteButton.ButtonStyle differs from headlamp's ButtonStyle type
-    <AKSProjectDeleteButton project={project} buttonStyle={buttonStyle} />
-  ),
+  component: ({ project }) => <AKSProjectDeleteButton project={project} />,
 });

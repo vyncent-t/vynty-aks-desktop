@@ -13,7 +13,6 @@ import { registerAKSCluster } from '../../utils/azure/aks';
 import { applyProjectLabels } from '../../utils/kubernetes/namespaceUtils';
 import { getClusterSettings, setClusterSettings } from '../../utils/shared/clusterSettings';
 import AzureAuthGuard from '../AzureAuth/AzureAuthGuard';
-import AzureCliWarning from '../AzureCliWarning';
 import { ConversionDialog } from './components/ConversionDialog';
 
 interface ImportSelection {
@@ -44,12 +43,12 @@ function ImportAKSProjectsContent() {
   }, [discoveryError]);
 
   // Selection state layered on top of discovered namespaces
-  const [selections, setSelections] = useState<Map<string, boolean>>(new Map());
+  const [selections, setSelections] = useState<Set<string>>(new Set());
 
   // Derive selectable list from discovered namespaces
   const namespaces: ImportSelection[] = discovered.map(ns => ({
     namespace: ns,
-    selected: selections.get(`${ns.clusterName}/${ns.name}`) ?? false,
+    selected: selections.has(`${ns.clusterName}/${ns.name}`),
   }));
 
   const selectedNamespaces = namespaces.filter(ns => ns.selected);
@@ -68,24 +67,22 @@ function ImportAKSProjectsContent() {
   const toggleSelection = (ns: DiscoveredNamespace) => {
     setSelections(prev => {
       const key = `${ns.clusterName}/${ns.name}`;
-      const next = new Map(prev);
-      next.set(key, !prev.get(key));
-      return next;
-    });
-  };
-
-  const selectAll = () => {
-    setSelections(() => {
-      const next = new Map<string, boolean>();
-      for (const ns of discovered) {
-        next.set(`${ns.clusterName}/${ns.name}`, true);
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
       }
       return next;
     });
   };
 
+  const selectAll = () => {
+    setSelections(new Set(discovered.map(ns => `${ns.clusterName}/${ns.name}`)));
+  };
+
   const deselectAll = () => {
-    setSelections(new Map());
+    setSelections(new Set());
   };
 
   const handleCancel = () => {
@@ -309,19 +306,13 @@ function ImportAKSProjectsContent() {
     const successfulClusters = new Set(results.filter(r => r.success).map(r => r.clusterName)).size;
 
     if (successCount > 0) {
-      const failureText = failureCount > 0 ? t('{{count}} failed.', { count: failureCount }) : '';
-      setSuccess(
-        t(
-          'Successfully merged {{clusters}} cluster{{clustersSuffix}} with {{projects}} project{{projectsSuffix}}{{failureText}}',
-          {
-            clusters: successfulClusters,
-            clustersSuffix: successfulClusters > 1 ? 's' : '',
-            projects: successCount,
-            projectsSuffix: successCount > 1 ? 's' : '',
-            failureText: failureText ? ` ${failureText}` : '.',
-          }
-        )
-      );
+      const clusterText = t('Successfully merged {{count}} cluster', {
+        count: successfulClusters,
+      });
+      const projectText = t('with {{count}} project', { count: successCount });
+      const failureSuffix =
+        failureCount > 0 ? ` ${t('{{count}} failed.', { count: failureCount })}` : '.';
+      setSuccess(`${clusterText} ${projectText}${failureSuffix}`);
     } else if (results.length > 0) {
       setError(t('Failed to import any projects. See details below.'));
     }
@@ -334,7 +325,6 @@ function ImportAKSProjectsContent() {
 
   return (
     <>
-      <AzureCliWarning suggestions={[]} />
       <PageGrid>
         <SectionBox title={t('Import AKS Projects')}>
           <Typography variant="body1" sx={{ mb: 3 }}>
@@ -347,8 +337,11 @@ function ImportAKSProjectsContent() {
             <Alert
               severity="error"
               onClose={() => {
-                setError('');
-                setDismissedDiscoveryError(true);
+                if (error) {
+                  setError('');
+                } else {
+                  setDismissedDiscoveryError(true);
+                }
               }}
               sx={{ mb: 2 }}
             >
@@ -511,8 +504,12 @@ function ImportAKSProjectsContent() {
           {importResults && importResults.length > 0 && (
             <>
               <Box sx={{ mt: 2 }}>
-                {importResults.map((result, idx) => (
-                  <Alert key={idx} severity={result.success ? 'success' : 'error'} sx={{ mb: 1 }}>
+                {importResults.map(result => (
+                  <Alert
+                    key={`${result.clusterName}/${result.namespace}`}
+                    severity={result.success ? 'success' : 'error'}
+                    sx={{ mb: 1 }}
+                  >
                     <strong>{result.namespace}</strong>: {result.message}
                   </Alert>
                 ))}

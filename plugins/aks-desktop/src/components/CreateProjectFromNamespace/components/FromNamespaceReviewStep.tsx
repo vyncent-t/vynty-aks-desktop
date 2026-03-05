@@ -132,7 +132,7 @@ export const FromNamespaceReviewStep: React.FC<FromNamespaceReviewStepProps> = (
 
         {/* Networking and Compute Quota Side by Side */}
         <Grid item xs={12} md={6}>
-          <Card variant="outlined" sx={{ p: 2, mb: 2, height: '200px' }}>
+          <Card variant="outlined" sx={{ p: 2, mb: 2, minHeight: '200px' }}>
             <Typography variant="h6" component="h3" gutterBottom sx={sectionTitleSx}>
               <Icon icon="mdi:network" style={{ marginRight: 8, verticalAlign: 'middle' }} />
               {t('Networking Policies')}
@@ -155,7 +155,7 @@ export const FromNamespaceReviewStep: React.FC<FromNamespaceReviewStepProps> = (
         </Grid>
 
         <Grid item xs={12} md={6}>
-          <Card variant="outlined" sx={{ p: 2, mb: 2, height: '200px' }}>
+          <Card variant="outlined" sx={{ p: 2, mb: 2, minHeight: '200px' }}>
             <Typography variant="h6" component="h3" gutterBottom sx={sectionTitleSx}>
               <Icon icon="mdi:cpu-64-bit" style={{ marginRight: 8, verticalAlign: 'middle' }} />
               {t('Compute Quota')}
@@ -165,7 +165,6 @@ export const FromNamespaceReviewStep: React.FC<FromNamespaceReviewStepProps> = (
                 <Box
                   sx={theme => ({
                     p: 1,
-                    // @ts-ignore todo: fix palette type so background.muted is recognized
                     backgroundColor: theme.palette.background.muted,
                     borderRadius: 1,
                     border: `1px solid ${theme.palette.divider}`,
@@ -193,7 +192,6 @@ export const FromNamespaceReviewStep: React.FC<FromNamespaceReviewStepProps> = (
                 <Box
                   sx={theme => ({
                     p: 1,
-                    // @ts-ignore todo: fix palette type so background.muted is recognized
                     backgroundColor: theme.palette.background.muted,
                     borderRadius: 1,
                     border: `1px solid ${theme.palette.divider}`,
@@ -240,13 +238,13 @@ export const FromNamespaceReviewStep: React.FC<FromNamespaceReviewStepProps> = (
               </Typography>
             ) : (
               <Box
-                sx={{
+                sx={theme => ({
                   maxHeight: '200px',
                   overflowY: 'auto',
-                  border: '1px solid #e0e0e0',
+                  border: `1px solid ${theme.palette.divider}`,
                   borderRadius: 1,
                   p: 1,
-                }}
+                })}
               >
                 {formData.userAssignments.map((assignment, idx) => (
                   <Box
@@ -254,7 +252,6 @@ export const FromNamespaceReviewStep: React.FC<FromNamespaceReviewStepProps> = (
                     sx={theme => ({
                       mb: 2,
                       p: 1,
-                      // @ts-ignore todo: fix palette type so background.muted is recognized
                       backgroundColor: theme.palette.background.muted,
                       borderRadius: 1,
                       border: `1px solid ${theme.palette.divider}`,

@@ -149,7 +149,7 @@ function fetchRegularNamespacesForCluster(clusterName: string): Promise<Discover
  */
 export const useNamespaceDiscovery = (): UseNamespaceDiscoveryReturn => {
   const [namespaces, setNamespaces] = useState<DiscoveredNamespace[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const latestRequestIdRef = useRef(0);
   const clustersConf = K8s.useClustersConf();
@@ -157,15 +157,12 @@ export const useNamespaceDiscovery = (): UseNamespaceDiscoveryReturn => {
   // Produce a stable string key from cluster names so that `discover` (below)
   // is only recreated when the actual set of registered clusters changes,
   // not every time clustersConf returns a new object reference.
-  const registeredClusterNamesKey = useMemo(() => {
-    if (!clustersConf) return '';
-    return Object.keys(clustersConf).sort().join(',');
+  const { registeredClusterNames, registeredClusterNamesKey } = useMemo(() => {
+    if (!clustersConf)
+      return { registeredClusterNames: [] as string[], registeredClusterNamesKey: '' };
+    const names = Object.keys(clustersConf).sort();
+    return { registeredClusterNames: names, registeredClusterNamesKey: names.join(',') };
   }, [clustersConf]);
-
-  const registeredClusterNames = useMemo(() => {
-    if (!registeredClusterNamesKey) return [];
-    return registeredClusterNamesKey.split(',');
-  }, [registeredClusterNamesKey]);
 
   const discover = useCallback(async () => {
     const requestId = ++latestRequestIdRef.current;

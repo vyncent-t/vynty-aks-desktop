@@ -4,8 +4,16 @@
 import { Icon } from '@iconify/react';
 import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { PageGrid, SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { Box, Button, Card, CardContent, CircularProgress, Typography } from '@mui/material';
-import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  CircularProgress,
+  TextField,
+  Typography,
+} from '@mui/material';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { DiscoveredNamespace, useNamespaceDiscovery } from '../../hooks/useNamespaceDiscovery';
 import { useRegisteredClusters } from '../../hooks/useRegisteredClusters';
@@ -55,6 +63,16 @@ function CreateProjectFromNamespaceContent() {
   const [applicationName, setApplicationName] = useState('');
   const [selectedNamespace, setSelectedNamespace] = useState<DiscoveredNamespace | null>(null);
   const [cliSuggestions, setCliSuggestions] = useState<string[]>([]);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup success timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Hooks
   const { formData, updateFormData } = useFormData();
@@ -79,7 +97,7 @@ function CreateProjectFromNamespaceContent() {
         resourceGroup: selectedNamespace.resourceGroup,
       });
     }
-  }, [selectedNamespace]);
+  }, [selectedNamespace, updateFormData]);
 
   // Validation per step
   const validation = useMemo(() => {
@@ -143,12 +161,14 @@ function CreateProjectFromNamespaceContent() {
 
       const isImportOnly = selectedNamespace.category === 'needs-import';
 
+      let timeoutId: ReturnType<typeof setTimeout>;
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
           reject(
             new Error(
               t(
-                'Conversion timed out after 10 minutes. Please check the namespace status and try again.'
+                'Conversion timed out after {{minutes}} minutes. Please check the namespace status and try again.',
+                { minutes: CONVERSION_TIMEOUT_MS / 60000 }
               )
             )
           );
@@ -227,6 +247,7 @@ function CreateProjectFromNamespaceContent() {
           subscriptionId: selectedNamespace.subscriptionId,
           assignments: formData.userAssignments,
           onProgress: msg => setConversionProgress(msg),
+          t,
         });
 
         if (!roleResult.success) {
@@ -242,9 +263,13 @@ function CreateProjectFromNamespaceContent() {
         setConversionProgress(t('Conversion completed successfully!'));
       })();
 
-      await Promise.race([conversionPromise, timeoutPromise]);
+      try {
+        await Promise.race([conversionPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timeoutId!);
+      }
 
-      setTimeout(() => {
+      successTimeoutRef.current = setTimeout(() => {
         setIsConverting(false);
         setShowSuccessDialog(true);
       }, 2000);
@@ -299,7 +324,6 @@ function CreateProjectFromNamespaceContent() {
 
   return (
     <>
-      {/** @ts-ignore */}
       <PageGrid maxWidth="lg" sx={{ margin: '0 auto' }}>
         <SectionBox
           title={t('Project from Existing Namespace')}
@@ -316,7 +340,7 @@ function CreateProjectFromNamespaceContent() {
             {/* Loading / Success / Error Overlay */}
             {(isConverting || showSuccessDialog || conversionError) && (
               <Box
-                sx={(theme: any) => ({
+                sx={theme => ({
                   position: 'absolute',
                   top: 0,
                   left: 0,
@@ -467,18 +491,13 @@ function CreateProjectFromNamespaceContent() {
                       })}
                     </Typography>
                     <Box sx={{ mb: 3 }}>
-                      <input
-                        type="text"
+                      <TextField
+                        fullWidth
+                        size="small"
                         value={applicationName}
                         onChange={e => setApplicationName(e.target.value)}
                         placeholder={`${t('Enter application name')}...`}
-                        style={{
-                          width: '100%',
-                          padding: '12px',
-                          border: '1px solid #ccc',
-                          borderRadius: '4px',
-                          marginBottom: '8px',
-                        }}
+                        sx={{ mb: 1 }}
                       />
                       <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'left' }}>
                         {t(
@@ -491,7 +510,7 @@ function CreateProjectFromNamespaceContent() {
                         variant="outlined"
                         onClick={() => {
                           setShowSuccessDialog(false);
-                          window.location.href = '/';
+                          history.push('/');
                         }}
                         sx={{ minWidth: 120 }}
                       >

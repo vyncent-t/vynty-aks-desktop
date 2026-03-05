@@ -60,7 +60,6 @@ vi.mock('../../utils/kubernetes/namespaceUtils', () => ({
 const mockUpdateManagedNamespace = vi.fn();
 vi.mock('../../utils/azure/az-cli', () => ({
   updateManagedNamespace: (...args: any[]) => mockUpdateManagedNamespace(...args),
-  checkAzureCliAndAksPreview: () => Promise.resolve({ suggestions: [] }),
 }));
 
 const mockAssignRolesToNamespace = vi.fn();
@@ -68,9 +67,10 @@ vi.mock('../../utils/azure/roleAssignment', () => ({
   assignRolesToNamespace: (...args: any[]) => mockAssignRolesToNamespace(...args),
 }));
 
+const mockSetClusterSettings = vi.fn();
 vi.mock('../../utils/shared/clusterSettings', () => ({
   getClusterSettings: () => ({ allowedNamespaces: [] }),
-  setClusterSettings: vi.fn(),
+  setClusterSettings: (...args: any[]) => mockSetClusterSettings(...args),
 }));
 
 vi.mock('../../utils/azure/checkAzureCli', () => ({
@@ -91,7 +91,7 @@ vi.mock('../CreateAKSProject/hooks/useExtensionCheck', () => ({
 }));
 
 vi.mock('../CreateAKSProject/hooks/useFormData', async () => {
-  const { useState } = await import('react');
+  const { useCallback, useState } = await import('react');
   return {
     useFormData: () => {
       const [formData, setFormData] = useState({
@@ -108,10 +108,11 @@ vi.mock('../CreateAKSProject/hooks/useFormData', async () => {
         memoryLimit: 4096,
         userAssignments: [{ email: '', role: 'Writer' }],
       });
-      return {
-        formData,
-        updateFormData: (updates: any) => setFormData((prev: any) => ({ ...prev, ...updates })),
-      };
+      const updateFormData = useCallback(
+        (updates: any) => setFormData((prev: any) => ({ ...prev, ...updates })),
+        []
+      );
+      return { formData, updateFormData };
     },
   };
 });
@@ -194,6 +195,7 @@ describe('CreateProjectFromNamespace', () => {
     mockApplyProjectLabels.mockReset();
     mockUpdateManagedNamespace.mockReset();
     mockAssignRolesToNamespace.mockReset();
+    mockSetClusterSettings.mockReset();
     mockUseRegisteredClusters.mockReturnValue(new Set());
     mockUseNamespaceDiscovery.mockReturnValue(defaultDiscoveryReturn());
   });
@@ -427,5 +429,136 @@ describe('CreateProjectFromNamespace', () => {
     });
 
     expect(screen.getByText('Cluster registration failed')).toBeInTheDocument();
+  });
+
+  test('shows success overlay after successful conversion', async () => {
+    vi.useFakeTimers();
+
+    const ns = makeDiscoveredNamespace({
+      name: 'ns1',
+      clusterName: 'cluster-a',
+      resourceGroup: 'rg-a',
+      subscriptionId: 'sub-a',
+    });
+    mockUseNamespaceDiscovery.mockReturnValue(defaultDiscoveryReturn([ns]));
+    mockRegisterAKSCluster.mockResolvedValue({ success: true });
+    mockApplyProjectLabels.mockResolvedValue(undefined);
+    mockUpdateManagedNamespace.mockResolvedValue(undefined);
+    mockAssignRolesToNamespace.mockResolvedValue({
+      success: true,
+      results: [],
+      errors: [],
+    });
+
+    render(<CreateProjectFromNamespace />);
+
+    // Navigate to review and submit
+    fireEvent.click(screen.getByText('ns1'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Convert to Project'));
+
+    // Wait for async operations to complete
+    await vi.runAllTimersAsync();
+
+    expect(screen.getByText('Namespace Converted Successfully!')).toBeInTheDocument();
+    expect(screen.getByText('Go To Projects')).toBeInTheDocument();
+    expect(screen.getByText('Create Application')).toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  test('calls updateManagedNamespace with correct form data', async () => {
+    const ns = makeDiscoveredNamespace({
+      name: 'ns1',
+      clusterName: 'cluster-a',
+      resourceGroup: 'rg-a',
+      subscriptionId: 'sub-a',
+    });
+    mockUseNamespaceDiscovery.mockReturnValue(defaultDiscoveryReturn([ns]));
+    mockRegisterAKSCluster.mockResolvedValue({ success: true });
+    mockApplyProjectLabels.mockResolvedValue(undefined);
+    mockUpdateManagedNamespace.mockResolvedValue(undefined);
+    mockAssignRolesToNamespace.mockResolvedValue({
+      success: true,
+      results: [],
+      errors: [],
+    });
+
+    render(<CreateProjectFromNamespace />);
+
+    // Navigate to review and submit
+    fireEvent.click(screen.getByText('ns1'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Convert to Project'));
+
+    await waitFor(() => {
+      expect(mockUpdateManagedNamespace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clusterName: 'cluster-a',
+          resourceGroup: 'rg-a',
+          namespaceName: 'ns1',
+          subscriptionId: 'sub-a',
+        })
+      );
+    });
+  });
+
+  test('back button navigates to previous step', () => {
+    const ns = makeDiscoveredNamespace({ name: 'ns1' });
+    mockUseNamespaceDiscovery.mockReturnValue(defaultDiscoveryReturn([ns]));
+
+    render(<CreateProjectFromNamespace />);
+
+    // Select namespace and advance to Networking
+    fireEvent.click(screen.getByText('ns1'));
+    fireEvent.click(screen.getByText('Next'));
+
+    // Verify we're past step 1
+    expect(screen.getByText('Back')).toBeInTheDocument();
+
+    // Click Back
+    fireEvent.click(screen.getByText('Back'));
+
+    // Should be back on namespace selection
+    expect(screen.getByText('Select a Namespace')).toBeInTheDocument();
+  });
+
+  test('handles partial role assignment failure', async () => {
+    const ns = makeDiscoveredNamespace({
+      name: 'ns1',
+      clusterName: 'cluster-a',
+      resourceGroup: 'rg-a',
+      subscriptionId: 'sub-a',
+    });
+    mockUseNamespaceDiscovery.mockReturnValue(defaultDiscoveryReturn([ns]));
+    mockRegisterAKSCluster.mockResolvedValue({ success: true });
+    mockApplyProjectLabels.mockResolvedValue(undefined);
+    mockUpdateManagedNamespace.mockResolvedValue(undefined);
+    mockAssignRolesToNamespace.mockResolvedValue({
+      success: false,
+      results: [{ email: 'user@example.com', success: false, error: 'Not found' }],
+      errors: ['Role assignment failed for user@example.com'],
+    });
+
+    render(<CreateProjectFromNamespace />);
+
+    // Navigate to review and submit
+    fireEvent.click(screen.getByText('ns1'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('Convert to Project'));
+
+    // Should still show success (role failure is non-fatal) but with warning
+    await waitFor(() => {
+      expect(screen.getByText(/completed with errors|Converted Successfully/i)).toBeInTheDocument();
+    });
   });
 });
