@@ -24,6 +24,7 @@ import AzureProfilePage from './components/AzureAuth/AzureProfilePage';
 import ClusterCapabilityCard from './components/ClusterCapabilityCard/ClusterCapabilityCard';
 import ConfigurePipelineButton from './components/ConfigurePipeline/ConfigurePipelineButton';
 import CreateAKSProject from './components/CreateAKSProject/CreateAKSProject';
+import CreateNamespace from './components/CreateNamespace/CreateNamespace';
 import AKSProjectDeleteButton from './components/DeleteAKSProject/AKSProjectDeleteButton';
 import DeployButton from './components/Deploy/DeployButton';
 import PipelineCard from './components/Deployments/PipelineCard';
@@ -230,22 +231,45 @@ if (Headlamp.isRunningAsApp()) {
     useClusterURL: false,
   });
 
-  // register create custom project for AKS.
+  // Override built-in "Use Existing Namespace(s)" with enhanced AKS version
+  // that discovers both managed namespaces (via Azure Resource Graph) and regular namespaces
   registerCustomCreateProject({
-    id: 'aks',
-    name: 'AKS managed project',
-    description: 'Create a new AKS project implemented on AKS managed namespaces',
-    component: () => <Redirect to="/projects/create-aks-project" />,
-    icon: 'logos:microsoft-azure',
-  });
-
-  // register import existing AKS projects
-  registerCustomCreateProject({
-    id: 'aks-import',
-    name: 'Import AKS projects',
-    description: 'Import existing AKS managed namespaces as projects',
+    id: 'use-existing-namespace',
+    name: 'Use Existing Namespace(s)',
+    description: 'Select namespaces to use as a project',
     component: () => <Redirect to="/projects/import-aks-projects" />,
     icon: 'mdi:import',
+  });
+
+  // Override built-in "Create New Namespace" with AKS-aware version
+  registerRoute({
+    path: '/projects/create-namespace',
+    component: CreateNamespace,
+    name: 'Create New Namespace',
+    sidebar: {
+      sidebar: 'HOME',
+      item: 'projects',
+    },
+    exact: true,
+    noAuthRequired: true,
+    useClusterURL: false,
+  });
+
+  registerCustomCreateProject({
+    id: 'create-namespace',
+    name: 'Create New Namespace',
+    description: 'New namespace with resources as a project',
+    component: () => <Redirect to="/projects/create-namespace" />,
+    icon: 'mdi:folder-add',
+  });
+
+  // AKS-specific: Create new managed namespace via Azure
+  registerCustomCreateProject({
+    id: 'create-aks-managed-namespace',
+    name: 'Create New AKS Managed Namespace',
+    description: 'Create new AKS managed namespace and use as a project',
+    component: () => <Redirect to="/projects/create-aks-project" />,
+    icon: 'logos:microsoft-azure',
   });
 
   // Register AKS as a cluster provider in the "Add Cluster" page
@@ -377,8 +401,5 @@ registerProjectHeaderAction({
 // Register custom delete button for AKS projects only
 registerProjectDeleteButton({
   isEnabled: isAksProject,
-  component: ({ project, buttonStyle }) => (
-    // @ts-expect-error AKSProjectDeleteButton.ButtonStyle differs from headlamp's ButtonStyle type
-    <AKSProjectDeleteButton project={project} buttonStyle={buttonStyle} />
-  ),
+  component: ({ project }) => <AKSProjectDeleteButton project={project} />,
 });

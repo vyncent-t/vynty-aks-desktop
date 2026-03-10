@@ -2,24 +2,33 @@
 // Licensed under the Apache 2.0.
 
 import { Icon } from '@iconify/react';
-import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
+import { K8s, useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { PageGrid, SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { useClustersConf } from '@kinvolk/headlamp-plugin/lib/k8s';
-import { Box, Button, Card, CardContent, CircularProgress, Typography } from '@mui/material';
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  CircularProgress,
+  TextField,
+  Typography,
+} from '@mui/material';
 import React, { useEffect, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
-import {
-  checkNamespaceExists,
-  createManagedNamespace,
-  createNamespaceRoleAssignment,
-  verifyNamespaceAccess,
-} from '../../utils/azure/az-cli';
+import { checkNamespaceExists, createManagedNamespace } from '../../utils/azure/az-cli';
 import { checkAzureCliAndAksPreview } from '../../utils/azure/checkAzureCli';
+import { assignRolesToNamespace } from '../../utils/azure/roleAssignment';
+import {
+  PROJECT_ID_LABEL,
+  PROJECT_MANAGED_BY_LABEL,
+  PROJECT_MANAGED_BY_VALUE,
+  RESOURCE_GROUP_LABEL,
+  SUBSCRIPTION_LABEL,
+} from '../../utils/constants/projectLabels';
 import AzureAuthGuard from '../AzureAuth/AzureAuthGuard';
 import AzureCliWarning from '../AzureCliWarning';
 import { AccessStep } from './components/AccessStep';
 import { BasicsStep } from './components/BasicsStep';
-// Import our new components and hooks
 import { Breadcrumb } from './components/Breadcrumb';
 import { ComputeStep } from './components/ComputeStep';
 import { NetworkingStep } from './components/NetworkingStep';
@@ -31,10 +40,10 @@ import { useFeatureCheck } from './hooks/useFeatureCheck';
 import { useFormData } from './hooks/useFormData';
 import { useNamespaceCheck } from './hooks/useNamespaceCheck';
 import { useValidation } from './hooks/useValidation';
-import { mapUIRoleToAzureRole, STEPS } from './types';
+import { STEPS } from './types';
 
 const useClusterCheck = ({ cluster }: { cluster?: string }) => {
-  const clustersConf = useClustersConf();
+  const clustersConf = K8s.useClustersConf() || {};
 
   const isClusterMissing =
     cluster && Object.values(clustersConf).find((it: any) => it.name === cluster) === undefined;
@@ -178,8 +187,9 @@ function CreateAKSProject() {
       setCreationProgress(`${t('Starting project creation')}...`);
 
       // Add timeout protection (10 minutes)
+      let timeoutId: ReturnType<typeof setTimeout>;
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
           reject(
             new Error(
               t(
@@ -206,10 +216,10 @@ function CreateAKSProject() {
           ingressPolicy: formData.ingress,
           egressPolicy: formData.egress,
           labels: {
-            'headlamp.dev/project-id': formData.projectName,
-            'headlamp.dev/project-managed-by': 'aks-desktop',
-            'aks-desktop/project-subscription': formData.subscription,
-            'aks-desktop/project-resource-group': formData.resourceGroup,
+            [PROJECT_ID_LABEL]: formData.projectName,
+            [PROJECT_MANAGED_BY_LABEL]: PROJECT_MANAGED_BY_VALUE,
+            [SUBSCRIPTION_LABEL]: formData.subscription,
+            [RESOURCE_GROUP_LABEL]: formData.resourceGroup,
           },
         });
 
@@ -275,148 +285,28 @@ function CreateAKSProject() {
         }
 
         setCreationProgress(
+          // Step 2: Add users to the namespace
           `${t('Namespace creation completed successfully! Adding user access')}...`
         );
 
-        // Step 2: Add users to the namespace (only if there are valid assignees)
-        const validAssignments = formData.userAssignments.filter(
-          assignment => assignment.email.trim() !== ''
-        );
+        const roleResult = await assignRolesToNamespace({
+          clusterName: formData.cluster,
+          resourceGroup: formData.resourceGroup,
+          namespaceName: formData.projectName,
+          subscriptionId: formData.subscription,
+          assignments: formData.userAssignments,
+          onProgress: msg => setCreationProgress(msg),
+          t,
+        });
 
-        if (validAssignments.length > 0) {
-          setCreationProgress(
-            `${t('Adding user access for {{count}} assignee', {
-              count: validAssignments.length,
-            })}...`
-          );
-
-          const assignmentResults = [];
-          const assignmentErrors = [];
-
-          for (let index = 0; index < validAssignments.length; index++) {
-            const assignment = validAssignments[index];
-            setCreationProgress(`${t('Adding user {{email}}', { email: assignment.email })}...`);
-
-            try {
-              // Map UI role to Azure role name
-              const azureRole = mapUIRoleToAzureRole(assignment.role);
-
-              // Roles to assign: the selected role and the default namespace user role
-              // Note: Platform-specific quoting is handled in createNamespaceRoleAssignment
-              // Namespace contributor is needed to allow users to delete the managed namespace
-              const rolesToAssign = [
-                azureRole,
-                'Azure Kubernetes Service Namespace User',
-                'Azure Kubernetes Service Namespace Contributor',
-              ];
-
-              // Create role assignments for both roles
-              const roleAssignmentResults = [];
-              for (const role of rolesToAssign) {
-                setCreationProgress(
-                  `${t('Assigning {{role}} to {{email}}', {
-                    role,
-                    email: assignment.email,
-                  })}...`
-                );
-
-                const roleResult = await createNamespaceRoleAssignment({
-                  clusterName: formData.cluster,
-                  resourceGroup: formData.resourceGroup,
-                  namespaceName: formData.projectName,
-                  assignee: assignment.email,
-                  role: role,
-                  subscriptionId: formData.subscription,
-                });
-
-                if (!roleResult.success) {
-                  // Capture full error details including stderr which contains Azure CLI error messages
-                  const errorDetails = roleResult.stderr || roleResult.error || t('Unknown error');
-                  roleAssignmentResults.push({
-                    role,
-                    success: false,
-                    error: errorDetails,
-                    errorField: roleResult.error,
-                    stderr: roleResult.stderr,
-                  });
-                } else {
-                  roleAssignmentResults.push({ role, success: true });
-                }
-              }
-
-              // Check if any role assignments failed (excluding skipped ones)
-              // Note: r.role contains the Azure role name (already mapped from UI role)
-              const failedRoles = roleAssignmentResults.filter(r => !r.success && !r.skipped);
-              if (failedRoles.length > 0) {
-                const failedRoleDetails = failedRoles
-                  .map(r => {
-                    // Use stderr if available (contains Azure CLI error), otherwise use error field
-                    // r.role is already the Azure role name (e.g., "Azure Kubernetes Service RBAC Writer")
-                    const errorMsg = r.stderr || r.error || t('Unknown error');
-                    return `${r.role}: ${errorMsg}`;
-                  })
-                  .join('; ');
-                assignmentErrors.push(
-                  t('Failed to assign roles to user {{email}}. {{details}}', {
-                    email: assignment.email,
-                    details: failedRoleDetails,
-                  })
-                );
-                continue;
-              }
-
-              // Verify the user has access
-              setCreationProgress(
-                `${t('Verifying access for user {{email}}', { email: assignment.email })}...`
-              );
-              const verifyResult = await verifyNamespaceAccess({
-                clusterName: formData.cluster,
-                resourceGroup: formData.resourceGroup,
-                namespaceName: formData.projectName,
-                assignee: assignment.email,
-                subscriptionId: formData.subscription,
-              });
-
-              if (!verifyResult.success) {
-                assignmentErrors.push(
-                  t('Failed to verify access for user {{email}}: {{message}}', {
-                    email: assignment.email,
-                    message: verifyResult.error || t('Verification failed'),
-                  })
-                );
-              } else if (!verifyResult.hasAccess) {
-                assignmentErrors.push(
-                  t('User {{email}} does not have the expected access to the namespace', {
-                    email: assignment.email,
-                  })
-                );
-              } else {
-                assignmentResults.push(
-                  '✓ ' + t('User {{email}} added successfully', { email: assignment.email })
-                );
-              }
-            } catch (userError) {
-              assignmentErrors.push(
-                t('Error processing user {{email}}: {{message}}', {
-                  email: assignment.email,
-                  message: userError.message,
-                })
-              );
-            }
+        if (!roleResult.success) {
+          const errorMessage = `${t(
+            'User assignment completed with errors'
+          )}\n${roleResult.errors.join('\n')}`;
+          if (roleResult.results.length > 0) {
+            console.warn('Some user assignments succeeded:', roleResult.results);
           }
-
-          // Report results
-          if (assignmentErrors.length > 0) {
-            const errorMessage = `${t(
-              'User assignment completed with errors'
-            )}\n${assignmentErrors.join('\n')}`;
-            if (assignmentResults.length > 0) {
-              console.warn('Some user assignments succeeded:', assignmentResults);
-            }
-            throw new Error(errorMessage);
-          }
-        } else {
-          setCreationProgress(`${t('No user assignments to process')}...`);
+          throw new Error(errorMessage);
         }
 
         setCreationProgress(t('Project creation completed successfully!'));
@@ -459,7 +349,11 @@ function CreateAKSProject() {
       })();
 
       // Race between creation and timeout
-      await Promise.race([creationPromise, timeoutPromise]);
+      try {
+        await Promise.race([creationPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timeoutId!);
+      }
 
       // Wait a moment to show success message
       setTimeout(() => {
@@ -722,18 +616,13 @@ function CreateAKSProject() {
                       )}
                     </Typography>
                     <Box sx={{ mb: 3 }}>
-                      <input
-                        type="text"
+                      <TextField
+                        fullWidth
+                        size="small"
                         value={applicationName}
                         onChange={e => setApplicationName(e.target.value)}
                         placeholder={`${t('Enter application name')}...`}
-                        style={{
-                          width: '100%',
-                          padding: '12px',
-                          border: '1px solid #ccc',
-                          borderRadius: '4px',
-                          marginBottom: '8px',
-                        }}
+                        sx={{ mb: 1 }}
                       />
                       <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'left' }}>
                         {t(
