@@ -162,6 +162,7 @@
   "Access Control ({{count}} assignee)_other": "Access Control ({{count}} assignees)",
   "Not specified": "Not specified",
   "Select an option": "Select an option",
+  "No options": "No options",
   "Starting project creation": "Starting project creation",
   "Project creation timed out after 10 minutes. Please check if the namespace was created and try again.": "Project creation timed out after 10 minutes. Please check if the namespace was created and try again.",
   "Initiating managed namespace creation": "Initiating managed namespace creation",
