@@ -1622,72 +1622,117 @@ export async function getClusterResourceGroupViaGraph(
   }
 }
 
+/**
+ * Fetches a single page of AKS clusters from Azure Resource Graph.
+ *
+ * The Resource Graph query returns at most 1000 results per call with --first 1000. (Maximum)
+ * If more results exist, the raw response includes a `skip_token` cursor that can
+ * be used to fetch the next page of results. This function returns both the clusters and
+ * a `skipToken` (mapped from the raw `skip_token` field) when pagination is required to
+ * fetch all clusters in larger subscriptions.
+ *
+ * @param query - Azure Resource Graph query to execute.
+ * @param skipToken - Pagination token from a previous call to fetch the next page.
+ * @returns The cluster records and an optional `skipToken` for the next page.
+ */
+async function fetchGraphPage(
+  query: string,
+  skipToken?: string
+): Promise<{ clusters: any[]; skipToken?: string }> {
+  const pageSize = '1000';
+  const args = ['graph', 'query', '-q', query, '--first', pageSize, '--output', 'json'];
+  // Append skip token for pagination if provided
+  if (skipToken) {
+    args.push('--skip-token', skipToken);
+  }
+
+  const { stdout, stderr } = await runCommandAsync('az', args);
+
+  if (stderr && needsRelogin(stderr)) {
+    throw new Error('Authentication required. Please log in to Azure CLI: az login');
+  }
+
+  if (stderr && stderr.toLowerCase().includes('error')) {
+    throw new Error(`Resource Graph query failed: ${stderr}`);
+  }
+
+  try {
+    const result = JSON.parse(stdout);
+    const clusters = result.data || [];
+
+    return { clusters, skipToken: result.skip_token };
+  } catch (parseError: unknown) {
+    const parseErrorMessage = parseError instanceof Error ? parseError.message : String(parseError);
+    const stdoutPreview = stdout.length > 500 ? stdout.slice(0, 500) + '…' : stdout;
+    throw new Error(
+      `Failed to parse Resource Graph query response: ${parseErrorMessage}. ` +
+        `Stdout length=${stdout.length}, preview=${JSON.stringify(stdoutPreview)}`
+    );
+  }
+}
+
 // Get clusters using Azure Resource Graph
 export async function getClustersViaGraph(
   subscriptionId: string,
   filterAad: boolean = false
 ): Promise<any[]> {
-  try {
-    if (!isValidGuid(subscriptionId)) {
-      throw new Error('Invalid subscription ID format');
-    }
+  if (!isValidGuid(subscriptionId)) {
+    throw new Error('Invalid subscription ID format');
+  }
 
-    const aadFilter = filterAad ? '| where isnotnull(properties.aadProfile)' : '';
+  const aadFilter = filterAad ? '| where isnotnull(properties.aadProfile)' : '';
 
-    const query = `
-      Resources
-      | where type =~ 'microsoft.containerservice/managedclusters'
-      | where subscriptionId == '${subscriptionId}'
-      ${aadFilter}
-      | extend nodeCount = array_length(properties.agentPoolProfiles)
-      | project
+  const query = `
+    Resources
+    | where type =~ 'microsoft.containerservice/managedclusters'
+    | where subscriptionId == '${subscriptionId}'
+    ${aadFilter}
+    | extend agentPools = properties.agentPoolProfiles
+    | mv-expand agentPools
+    | extend poolNodeCount = toint(agentPools['count'])
+    | summarize
+        nodeCount = sum(poolNodeCount)
+      by
         name,
         resourceGroup,
         location,
-        version = properties.kubernetesVersion,
-        status = properties.provisioningState,
-        powerState = properties.powerState.code,
-        nodeCount
-      | order by name asc
-    `;
+        version = tostring(properties.kubernetesVersion),
+        status = tostring(properties.provisioningState),
+        powerState = tostring(properties.powerState.code)
+    | order by name asc
+  `;
 
-    const { stdout, stderr } = await runCommandAsync('az', [
-      'graph',
-      'query',
-      '-q',
-      query,
-      '--output',
-      'json',
-    ]);
+  // Fetch first page
+  let page = await fetchGraphPage(query);
+  const allClusters = [...page.clusters];
 
-    if (stderr && needsRelogin(stderr)) {
-      throw new Error('Authentication required. Please log in to Azure CLI: az login');
-    }
-
-    if (stderr && (stderr.includes('ERROR') || stderr.includes('error'))) {
-      throw new Error(`Resource Graph query failed: ${stderr}`);
-    }
-
-    try {
-      const result = JSON.parse(stdout);
-      const clusters = result.data || [];
-
-      return clusters.map((cluster: any) => ({
-        name: cluster.name,
-        subscription: subscriptionId,
-        resourceGroup: cluster.resourceGroup,
-        location: cluster.location,
-        version: cluster.version,
-        status: cluster.status,
-        powerState: cluster.powerState || 'Unknown',
-        nodeCount: cluster.nodeCount || 0,
-      }));
-    } catch (parseError) {
-      throw new Error(`Failed to parse Resource Graph response: ${parseError}`);
-    }
-  } catch (error) {
-    throw error;
+  // Fetch remaining pages if the subscription has more clusters than one page holds.
+  // The Resource Graph response includes a `skipToken` only when more pages exist;
+  // on the final page it is null/absent, which will terminate the loop.
+  const MAX_PAGES = 100; // 100,000 cluster limit.
+  let pageCount = 1;
+  while (page.skipToken && pageCount < MAX_PAGES) {
+    page = await fetchGraphPage(query, page.skipToken);
+    allClusters.push(...page.clusters);
+    pageCount++;
   }
+
+  if (page.skipToken && pageCount >= MAX_PAGES) {
+    debugLog(
+      `Resource Graph pagination hit MAX_PAGES limit (${MAX_PAGES}). Results may be truncated.`
+    );
+  }
+
+  return allClusters.map((cluster: any) => ({
+    name: cluster.name,
+    subscription: subscriptionId,
+    resourceGroup: cluster.resourceGroup,
+    location: cluster.location,
+    version: cluster.version,
+    status: cluster.status,
+    powerState: cluster.powerState || 'Unknown',
+    nodeCount: cluster.nodeCount || 0,
+  }));
 }
 
 // Get total cluster count for a subscription using Azure Resource Graph
