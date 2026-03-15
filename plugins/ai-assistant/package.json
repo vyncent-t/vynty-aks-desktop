@@ -1,7 +1,7 @@
 {
   "name": "ai-assistant",
   "version": "0.1.0-alpha",
-  "description": "Headlamp's AI Assistant",
+  "description": "AKS desktop AI Assistant",
   "type": "module",
   "scripts": {
     "start": "headlamp-plugin start",

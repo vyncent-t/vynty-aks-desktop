@@ -1,10 +1,12 @@
-# Headlamp AI Assistant
+# AKS destkop AI Assistant
 
-The Headlamp AI Assistant is a plugin that integrates AI capabilities directly into Headlamp. It provides a conversational interface to interact with your Kubernetes clusters, helping you manage resources, troubleshoot issues, and understand complex configurations through natural language.
+The AKS desktop AI Assistant is a plugin that integrates AI capabilities directly into AKS desktop. It provides a conversational interface to interact with your Kubernetes clusters, helping you manage resources, troubleshoot issues, and understand complex configurations through natural language.
 
 The assistant is context-aware, meaning it uses information about your cluster to provide more relevant and accurate responses..
 
 **IMPORTANT:** This plugin is in alpha state and is disabled by default. You must enable the preview in Settings before using it.
+
+This is based on the Headlamp AI assistant.
 
 ## Getting Started
 
