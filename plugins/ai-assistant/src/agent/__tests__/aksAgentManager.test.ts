@@ -3,7 +3,7 @@ import {
   BASE_AKS_AGENT_PROMPT,
   buildEnrichedPrompt,
   shellEscapeSingleQuote,
-} from './aksAgentManager';
+} from '../aksAgentManager';
 
 describe('shellEscapeSingleQuote', () => {
   it('wraps simple strings in single quotes', () => {

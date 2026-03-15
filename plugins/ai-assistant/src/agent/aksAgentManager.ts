@@ -327,12 +327,22 @@ export async function getClusterResourceGroup(
 
 /** Strip ANSI/VT100 escape sequences and carriage returns from terminal output. */
 function stripAnsi(text: string): string {
-  return text
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '') // CSI sequences (colors, cursor, bracketed paste)
-    .replace(/\x1b[()][AB012]/g, '') // Character set selection
-    .replace(/\r/g, '') // Carriage returns
-    .replace(/\x1b/g, '') // Stray ESC characters (from split sequences)
-    .replace(/\[[\d;]*m/g, ''); // Orphaned ANSI codes missing ESC prefix (from terminal line wrapping)
+  return (
+    text
+      .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '') // CSI sequences (colors, cursor, bracketed paste)
+      .replace(/\x1b[()][AB012]/g, '') // Character set selection
+      .replace(/\r/g, '') // Carriage returns
+      .replace(/\x1b/g, '') // Stray ESC characters (from split sequences)
+      // Orphaned ANSI codes missing ESC prefix (from terminal line wrapping).
+      // Require at least one digit before 'm' so text like [main], [master]
+      // is not corrupted.  Negative lookahead prevents stripping Prometheus-style
+      // durations like [5m] or [30m] (followed by ], ), }, or word char).
+      .replace(/\[\d[\d;]*m(?![)\]}\w])/g, '')
+      .replace(/\s?\[(\d{1,3}(;\d{1,3})*)?$/gm, '') // Trailing orphan "[" fragments from split sequences (e.g. "[4" from "[4\n0m", or bare "[" from "\x1b[" at line end)
+      .replace(/^(?:\d{1,3};)+\d{1,3}m\s?/gm, '') // Orphaned multi-part ANSI at line start (e.g. "97;40m" from split sequence)
+      .replace(/^0m\s*$/gm, '') // Bare ANSI reset "0m" alone on a line (from split "[4\n0m"); K8s millicores like 25m/50m/200m appear in tabular data, not alone on a line
+      .replace(/^0m(?=:\s?)/gm, '')
+  ); // Orphan ANSI reset "0m" at start of YAML key/value line (e.g. "0m:" from split "\x1b[\n0m:" → "metadata:" after rejoining); safe because real "0m:" never starts a line in YAML
 }
 
 /**
@@ -346,6 +356,65 @@ function normalizeBullets(text: string): string {
     verboseLog('[AKS Agent Parse] normalizeBullets: converted Unicode bullets to markdown dashes');
   }
   return result;
+}
+
+/**
+ * Minimum word count for a line to be considered prose (rather than code).
+ * Used by isTermCodeLine and normalizeTerminalMarkdown to distinguish
+ * wrapped bold section headings from actual code content.
+ */
+const PROSE_WORD_THRESHOLD = 5;
+
+/**
+ * Regex matching code-like characters that should NOT appear in prose headings.
+ * Used by isProseHeadingEndingWithColon to exclude Python type hints,
+ * function signatures, shell constructs, etc.
+ */
+const CODE_LIKE_CHARS_RE = /[(){}\[\]=<>|\\;]/;
+
+/**
+ * Regex matching a capitalized single-word heading ending with colon,
+ * e.g. "Assumptions:", "Prerequisites:", "Requirements:".
+ * Used by the indented-block collector and panel recovery handler to
+ * break at prose headings that looksLikeYaml would otherwise absorb.
+ */
+const CAPITALIZED_HEADING_RE = /^[A-Z]\w+:\s*$/;
+
+/**
+ * Regex matching common code-keyword starts that indicate the collected
+ * block contains actual programming code (not kubectl/YAML output).
+ * Used by the capitalized prose heading break to distinguish "Assumptions:"
+ * after Go/Python code from "Events:" in kubectl describe output.
+ */
+const CODE_KEYWORD_START_RE =
+  /^(func |def |class |import |from |package |export |const |let |var |return |type )/;
+
+/**
+ * Check whether any line in a block contains code patterns (function
+ * definitions, imports, or brace/paren characters).  Used to detect
+ * that a capitalized heading like "Assumptions:" follows actual code
+ * and should break the block.
+ */
+function blockContainsCode(blockLines: string[]): boolean {
+  return blockLines.some(pl => {
+    const plt = pl.trim();
+    return CODE_KEYWORD_START_RE.test(plt) || /[{}()]/.test(plt);
+  });
+}
+
+/**
+ * Detect prose headings ending with colon that should NOT be treated as code
+ * or YAML keys.  Matches lines like "Also confirm:", "Build + push:" but
+ * excludes YAML keys ("spec:"), code lines, and lines with code-like characters
+ * (e.g. Python `) -> list[dict]:`, shell `if [ -f x ]:`, etc.).
+ */
+function isProseHeadingEndingWithColon(trimmed: string): boolean {
+  return (
+    /:\s*$/.test(trimmed) &&
+    !/^[\w][\w.\/-]*:/.test(trimmed) &&
+    !looksLikeShellOrDockerCodeLine(trimmed) &&
+    !CODE_LIKE_CHARS_RE.test(trimmed)
+  );
 }
 
 /**
@@ -692,6 +761,8 @@ const KNOWN_CODE_COMMANDS: ReadonlySet<string> = new Set([
   'configure',
   'gcc',
   'g++',
+  'gfortran',
+  'cobc',
   'cc',
   'c++',
   'clang',
@@ -714,6 +785,9 @@ const KNOWN_CODE_COMMANDS: ReadonlySet<string> = new Set([
   'xmake',
   'vcpkg',
   'conan',
+  'zig',
+  'nim',
+  'nimble',
 
   // ── Version managers ──
   'nvm',
@@ -1217,6 +1291,15 @@ const AMBIGUOUS_CODE_COMMANDS: ReadonlySet<string> = new Set([
   'tac',
   'look',
 
+  // Editors
+  'vi',
+  'vim',
+  'nano',
+  'emacs',
+  'ed',
+  'less',
+  'more',
+
   // Process / control
   'kill',
   'wait',
@@ -1297,6 +1380,9 @@ function hasShellSyntax(trimmed: string): boolean {
   // Output redirection: > or >>
   if (/\s>{1,2}\s/.test(trimmed) || /2>&1/.test(trimmed)) return true;
 
+  // Heredoc operator: <<EOF, <<'EOF', <<"EOF", <<-EOF
+  if (/<<-?\s*['"]?\w+['"]?\s*$/.test(trimmed)) return true;
+
   // Quoted arguments: "..." or '...'
   if (/\s["'][^"'\s]/.test(trimmed)) return true;
 
@@ -1309,6 +1395,66 @@ function hasShellSyntax(trimmed: string): boolean {
   // Backtick command substitution
   if (/`[^`]+`/.test(trimmed)) return true;
 
+  // File arguments: word.ext where ext is a known code/config file extension
+  // (e.g. "touch app.yaml", "vim config.json", "cat main.py")
+  if (
+    /\s[\w./-]+\.(ya?ml|json|toml|py|rs|go|js|ts|sh|bash|conf|cfg|ini|txt|log|md|html|css|xml|sql|env|lock|mod|sum)\b/.test(
+      trimmed
+    )
+  )
+    return true;
+
+  return false;
+}
+
+/**
+ * Detect "file header" comments — lines like `# Cargo.toml`, `// src/main.rs`,
+ * `# Dockerfile` that signal the start of a different file's content.
+ * Used by `normalizeTerminalMarkdown` to break code blocks at file-type
+ * boundaries (e.g. shell commands → Cargo.toml → Rust source).
+ *
+ * Matches comment lines where the comment body is a bare filename or path
+ * (with extension), or a well-known extensionless filename.
+ *
+ * YAML file headers (e.g. `# k8s.yaml`, `# deploy.yml`) are excluded
+ * because their content should be handled by `wrapBareYamlBlocks` instead.
+ */
+function isFileHeaderComment(trimmed: string): boolean {
+  // # filename.ext  or  // path/to/file.ext
+  if (/^(#|\/\/)\s+\S+\.\w+\s*$/.test(trimmed)) {
+    // Exclude YAML file headers — let wrapBareYamlBlocks handle those
+    if (/\.ya?ml\s*$/i.test(trimmed)) return false;
+    return true;
+  }
+  // Well-known extensionless filenames
+  if (
+    /^(#|\/\/)\s+(Dockerfile|Makefile|Vagrantfile|Gemfile|Rakefile|Procfile|Brewfile)\s*$/.test(
+      trimmed
+    )
+  )
+    return true;
+  return false;
+}
+
+/**
+ * Detect standalone filename headings — lines like `Cargo.toml`, `src/main.rs`,
+ * `Dockerfile` that Rich terminal renders as bold headings outside code panels.
+ * After ANSI stripping these become bare filenames on their own line.
+ *
+ * Used by `normalizeTerminalMarkdown` and `wrapBareCodeBlocks` to recognise
+ * that the next block of space-prefixed lines is a code file.
+ *
+ * YAML file headings are excluded — handled by `wrapBareYamlBlocks`.
+ */
+function isBoldFileHeading(trimmed: string): boolean {
+  // filename.ext  or  path/to/file.ext  (standalone on a line, no other words)
+  // Also matches dot-prefixed files like .env, .gitignore, .dockerignore
+  if (/^([\w.-]+\/)*[\w.-]*\.\w+$/.test(trimmed)) {
+    return true;
+  }
+  // Well-known extensionless filenames
+  if (/^(Dockerfile|Makefile|Vagrantfile|Gemfile|Rakefile|Procfile|Brewfile)$/.test(trimmed))
+    return true;
   return false;
 }
 
@@ -1364,6 +1510,9 @@ function looksLikeShellOrDockerCodeLine(trimmed: string): boolean {
   // Environment variable assignment: VAR=value or VAR="value"
   if (/^[A-Z_][A-Z0-9_]*=\S/.test(trimmed)) return true;
 
+  // Makefile variable assignment: VAR ?= value, VAR := value, VAR += value
+  if (/^[A-Z_][A-Z0-9_]*\s*[?:+]=/.test(trimmed)) return true;
+
   // Pipe between commands: word | word  (but not markdown table starting with |)
   if (/\w\s+\|\s+\w/.test(trimmed) && !/^\|/.test(trimmed)) return true;
 
@@ -1378,6 +1527,282 @@ function looksLikeShellOrDockerCodeLine(trimmed: string): boolean {
 
   // Line continuation: ends with backslash (short lines only to avoid prose)
   if (/\\\s*$/.test(trimmed) && trimmed.length < 80) return true;
+
+  // Bash for/while/until/done: "for x in ...; do", "while ...; do", "until ...; do", "done"
+  if (/^for\s+\w+\s+in\s/.test(trimmed)) return true;
+  if (/^(while|until)\s+.+;\s*do/.test(trimmed)) return true;
+  if (/^done\s*$/.test(trimmed)) return true;
+  // Bash if/elif/else/fi: "if ...; then", "elif ...; then", "else", "fi"
+  if (/^(if|elif)\s+.+;\s*then/.test(trimmed)) return true;
+  if (/^(else|fi)\s*$/.test(trimmed)) return true;
+  // Bash echo with variable expansion: "echo ..." containing $var
+  if (/^echo\s+.*\$/.test(trimmed)) return true;
+
+  // ── Tier 4: Python-specific patterns ──
+
+  // Python import: from X import Y  or  from X.Y import Z
+  if (/^from\s+\w+(\.\w+)*\s+import\s/.test(trimmed)) return true;
+
+  // Python import: import X  or  import X.Y  or  import X, Y
+  if (/^import\s+\w+/.test(trimmed)) return true;
+
+  // Python function definition: def func_name(  or  async def func_name(
+  if (/^(async\s+)?def\s+\w+\s*\(/.test(trimmed)) return true;
+
+  // Python/Ruby/Java/Scala/Kotlin class definition
+  if (/^((?:public|abstract|data|case|sealed)\s+)*class\s+[A-Z]\w*([\s(:;<]|$)/.test(trimmed))
+    return true;
+  // Scala object: object Name { ... }
+  if (/^object\s+[A-Z]\w*([\s{]|$)/.test(trimmed)) return true;
+  // Kotlin/Scala suspend/fun: suspend fun ..., fun ...(
+  if (/^(suspend\s+)?fun\s+\w+/.test(trimmed)) return true;
+  // Java/C# access modifiers: public/private/protected followed by type declarations
+  // Require the line to contain () or ; or { to avoid matching prose
+  if (/^(public|private|protected)\s+/.test(trimmed) && /[(){;]/.test(trimmed)) return true;
+
+  // Ruby def: def method_name  or  def method_name(args)
+  if (/^def\s+\w+(\.\w+)?(\(|$|\s*$)/.test(trimmed)) return true;
+
+  // Elixir: defmodule, defp, defmacro
+  if (/^(defmodule|defp?|defmacro)\s+\w/.test(trimmed)) return true;
+
+  // Python decorator: @app.route(...)  or  @staticmethod
+  if (/^@\w+/.test(trimmed)) return true;
+
+  // Python dunder (double underscore) patterns: __name__, __init__, __main__
+  // These are uniquely Python and should never be interpreted as markdown bold
+  if (/__\w+__/.test(trimmed)) return true;
+
+  // ── Tier 5: Rust / Go / general C-family patterns ──
+
+  // Rust use statement: use axum::{...}; — require :: (path separator) or ;
+  // to distinguish from English prose like "use this command"
+  if (/^(pub\s+)?use\s+\w+/.test(trimmed) && (/::/.test(trimmed) || /;\s*$/.test(trimmed)))
+    return true;
+
+  // Rust/Go function definition: fn main(), async fn root(), pub fn new()
+  if (/^(pub\s+)?(async\s+)?fn\s+\w+/.test(trimmed)) return true;
+
+  // Rust let binding: let app = ..., let mut x = ...
+  if (/^let\s+(mut\s+)?\w+\s*[:=]/.test(trimmed)) return true;
+
+  // Rust/Go type definitions: struct, enum, trait, impl, mod, type
+  if (/^(pub(\s*\(\s*crate\s*\))?\s+)?(struct|enum|trait|impl|mod)\s+\w+/.test(trimmed))
+    return true;
+
+  // Rust attribute: #[derive(...)], #[tokio::main]
+  if (/^#\[[\w:]+/.test(trimmed)) return true;
+
+  // C/C++ preprocessor: #include, #define, #ifdef, #ifndef, #endif, #pragma
+  if (/^#\s*(include|define|ifdef|ifndef|endif|pragma|undef|if|else|elif)\b/.test(trimmed))
+    return true;
+
+  // Rust match arm: "pattern => expr" (e.g. "200 => println!(...)")
+  if (/^\s*\S+\s*=>\s*\S/.test(trimmed)) return true;
+
+  // Shell case statement: "case ... in", "pattern)", ";;"
+  if (/^case\s+.+\s+in/.test(trimmed)) return true;
+  if (/^esac\s*$/.test(trimmed)) return true;
+  if (/^;;\s*$/.test(trimmed)) return true;
+
+  // Method chain continuation: .route("/", ...), .await, .unwrap()
+  // Require the dot to be followed by a typical method name pattern (word + paren
+  // or .await / .unwrap style) — excludes prose like ". However, the API..."
+  if (
+    /^\.\w+\(/.test(trimmed) ||
+    /^\.(await|unwrap|expect|then|catch|map|filter|and_then|or_else|into|collect|iter)\b/.test(
+      trimmed
+    )
+  )
+    return true;
+
+  // Lone closing brace (with optional semicolon): }  or };
+  if (/^\}\s*;?\s*$/.test(trimmed)) return true;
+
+  // Function/method calls: identifier.method(...), identifier(...) ending with ; or )
+  // Covers console.log(), fmt.Println(), println!(), print(), etc.
+  // Require a dot-method or known call pattern to avoid matching prose.
+  if (/^\w+(\.\w+)+\(/.test(trimmed)) return true; // obj.method(...) chains
+  if (/^\w+!\(/.test(trimmed)) return true; // Rust macros: println!(...), vec![...]
+
+  // try/catch/finally: error handling in Java/C#/JS/TS
+  if (/^(try|catch|finally)\s*[\({]/.test(trimmed)) return true;
+  if (/^throw\s+new\s/.test(trimmed)) return true;
+
+  // Go-specific: func, var, package, type keywords
+  if (/^(func|package)\s+\w+/.test(trimmed)) return true;
+  if (/^(var|type)\s+\w+\s+\w+/.test(trimmed)) return true;
+
+  // JS/TS variable declarations: const x = ..., let x = ..., var x = ...
+  // Require an assignment operator (=) to avoid matching prose.
+  if (/^(const|let)\s+\w+\s*=/.test(trimmed)) return true;
+
+  // Go control flow: if, for, switch, select, return, defer, go
+  // Require opening brace or parenthesis to avoid matching English prose.
+  if (/^(if|for|switch|select)\s+.+\{/.test(trimmed)) return true;
+  if (/^(defer|go)\s+(func\b|\w+\.\w+)/.test(trimmed)) return true;
+  if (/^return\s+\S/.test(trimmed) && /[;{}()\[\]]/.test(trimmed)) return true;
+
+  // Go/Rust short variable declaration: identifier := expr
+  // Also handles Go multi-return: a, b := expr
+  if (/^\w+(\s*,\s*\w+)*\s*:=\s*\S/.test(trimmed)) return true;
+
+  // Go channel send: identifier <- expr
+  if (/^\w+\s*<-\s*\S/.test(trimmed)) return true;
+
+  // Config directive lines ending with semicolon: proxy_pass http://...; listen 80;
+  // Common in NGINX, Apache, and similar config formats
+  if (/^\w[\w_]*\s+\S.*;\s*$/.test(trimmed) && trimmed.length < 120) return true;
+
+  // ── Tier 6: TOML / INI config patterns ──
+
+  // TOML section headers: [package], [dependencies], [workspace.dependencies], etc.
+  if (/^\[[\w.-]+\]/.test(trimmed)) return true;
+  // TOML key = value: name = "foo", version = "1.0", key = { ... }
+
+  // Python requirements.txt: package==version, package>=version, package~=version
+  if (/^\w[\w.-]*[=~!><]{1,2}\d/.test(trimmed)) return true;
+  if (/^[\w.-]+\s*=\s*["'{[\d]/.test(trimmed)) return true;
+
+  // ── Tier 6b: Terraform HCL patterns ──
+
+  // HCL resource/data/variable/output/provider/module/locals blocks
+  if (/^(resource|data|variable|output|provider|module|locals)\s+["{\w]/.test(trimmed)) return true;
+
+  // ── Tier 6c: Makefile directive patterns ──
+
+  // .PHONY, .SUFFIXES, .DEFAULT_GOAL, etc.
+  if (isMakefileDirective(trimmed)) return true;
+
+  // ── Tier 7: XML/HTML patterns ──
+
+  // XML opening/closing tags: <project ...>, </dependencies>, <?xml ...>
+  if (/^<\/?[\w?]/.test(trimmed)) return true;
+
+  // ── Tier 7b: SQL patterns ──
+
+  // SQL keywords at line start (case-insensitive): SELECT, INSERT, UPDATE,
+  // DELETE, ALTER, DROP, WHERE, etc.  CREATE, FROM, JOIN, SET, VALUES are
+  // handled separately below because they overlap with English prose/filenames.
+  if (
+    /^(SELECT|INSERT|UPDATE|DELETE|ALTER|DROP|WHERE|LEFT|RIGHT|INNER|OUTER|GROUP\s+BY|ORDER\s+BY|HAVING|UNION|LIMIT|OFFSET|INTO|GRANT|REVOKE|BEGIN|COMMIT|ROLLBACK)\b/i.test(
+      trimmed
+    )
+  )
+    return true;
+  // SQL CREATE: require specific SQL object type after it
+  if (
+    /^CREATE\s+(TABLE|INDEX|DATABASE|VIEW|SCHEMA|FUNCTION|PROCEDURE|TRIGGER|TYPE|ROLE|USER|SEQUENCE|EXTENSION)\b/i.test(
+      trimmed
+    )
+  )
+    return true;
+  // SQL FROM: require it to NOT be followed by English article
+  if (/^FROM\s+\w/i.test(trimmed) && !/^FROM\s+(the|a|an)\b/i.test(trimmed)) return true;
+  // SQL JOIN: require a specific join pattern like "JOIN table ON column"
+  // Exclude English prose like "join the two tables on ID"
+  if (/^(INNER|LEFT|RIGHT|FULL|CROSS)\s+JOIN\b/i.test(trimmed)) return true;
+
+  // ── Tier 8: kubectl / K8s structured output ──
+
+  // kubectl describe output: "Key:   value" with 2+ spaces between
+  if (/^[\w]+:\s{2,}\S/.test(trimmed)) return true;
+  // kubectl table headers/rows: "NAME   STATUS   AGE" or dashed separators "----"
+  if (/^-{4,}/.test(trimmed)) return true;
+  // Log lines: "2026-03-12T10:23:45Z INFO ..."
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(trimmed)) return true;
+  // K8s klog format: "I0115 10:30:00.000000 1 file.go:N] message"
+  // Used by controller-manager, kubelet, kube-apiserver
+  if (/^[IWEF]\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+/.test(trimmed)) return true;
+  // Structured logging (logfmt): "level=info msg=\"...\" key=value"
+  if (/^(level|ts|time|msg)=\S/.test(trimmed)) return true;
+  // Tabular output: lines with 3+ column-aligned gaps (2+ spaces between words)
+  // e.g. "NAME   STATUS   AGE", "Type    Reason   Age   From     Message"
+  if ((trimmed.match(/\S\s{2,}\S/g) ?? []).length >= 2) return true;
+
+  // PromQL functions: sum(rate(...{...}[5m])) etc.
+  if (
+    /\b(rate|sum|histogram_quantile|avg|count|avg_over_time|increase)\(/.test(trimmed) &&
+    /[{[\]]/.test(trimmed)
+  )
+    return true;
+  // Prometheus metric format: metric_name{labels} value
+  if (/^[a-z_][a-z0-9_]*\{[^}]+\}\s+\S/.test(trimmed)) return true;
+
+  // K8s event messages: verbs from kubectl describe events
+  if (
+    /^(Pulling|Pulled|Created|Started|Killing|Stopped|Attached|Detached|Scheduled|FailedScheduling)\s+(image\s+"[^"]*"|container\s+\S|volume\s+"[^"]*")/.test(
+      trimmed
+    )
+  )
+    return true;
+  if (/^(Successfully\s+assigned|Container\s+image\s+")/.test(trimmed)) return true;
+
+  // Probe failures
+  if (/^(Readiness|Liveness|Startup)\s+probe\s+failed:/.test(trimmed)) return true;
+
+  // Scheduling messages
+  if (/^\d+\/\d+\s+nodes\s+are\s+available:/.test(trimmed)) return true;
+  if (/^Insufficient\s+(cpu|memory)\b/.test(trimmed)) return true;
+  if (/^node\(s\)\s+(had|did\s+not\s+match)\b/.test(trimmed)) return true;
+
+  // CRI-O log prefix
+  if (/^(stdout|stderr)\s+F\s+/.test(trimmed)) return true;
+
+  // K8s operation failures
+  if (
+    /^(MountVolume\.|AttachVolume\.|Failed\s+to\s+pull\s+image|Error\s+response\s+from\s+daemon)/.test(
+      trimmed
+    )
+  )
+    return true;
+  if (/^Unable\s+to\s+attach\s+or\s+mount\s+volumes/.test(trimmed)) return true;
+
+  // Container lifecycle
+  if (/^Back-off\s+restarting/.test(trimmed)) return true;
+  if (/^Container\s+\S+.*\b(definition\s+changed|failed\s+liveness\s+probe)/.test(trimmed))
+    return true;
+  if (/^Killing\s+container\s+with/.test(trimmed)) return true;
+
+  // Dotted key=value pairs
+  if (/^[a-z][\w]*\.[a-z][\w]*=\S/.test(trimmed)) return true;
+
+  // Normal BackOff event lines
+  if (/^Normal\s+\w+\s+\d/.test(trimmed)) return true;
+
+  // Short lines ending with { — CSS selectors, function declarations, etc.
+  // Require the line to be short (≤ 40 chars) to avoid matching prose.
+  if (/\{\s*$/.test(trimmed) && trimmed.length <= 40) return true;
+
+  // ── Tier 9: kubectl resource/action output ──
+
+  // kubectl resource action output: "resource.group/name verb" or "resource/name verb"
+  // e.g. "deployment.apps/my-app scaled", "service/my-svc created",
+  //      "namespace/monitoring created", "configmap/my-config unchanged"
+  if (
+    /^[\w.-]+\/[\w.-]+\s+(created|configured|unchanged|deleted|scaled|patched|annotated|labeled|exposed|applied|pruned|edited|replaced)\s*$/.test(
+      trimmed
+    )
+  )
+    return true;
+
+  // Docker build step output: "Step 1/10 : FROM ..."
+  if (/^Step\s+\d+\/\d+\s*:/.test(trimmed)) return true;
+
+  // Docker build layer hash: " ---> abc123def456"
+  if (/^\s*-{3}>\s+[0-9a-f]+/.test(trimmed)) return true;
+
+  // Docker build status: "Successfully built ...", "Successfully tagged ..."
+  if (/^Successfully\s+(built|tagged|pushed)\s/.test(trimmed)) return true;
+
+  // Terraform plan +/- prefix: lines starting with + or - in plan output
+  // followed by resource keyword or indented assignment
+  if (/^\+\s+(resource|data)\s+["']/.test(trimmed)) return true;
+  if (/^\+\s{2,}\w+\s*=\s*\S/.test(trimmed)) return true;
+
+  // Helm template Go expressions: {{- if .Values ... }}, {{ include "..." }}, {{- end }}
+  if (/^\{\{-?\s*(if|else|end|range|with|define|template|block|include)\b/.test(trimmed))
+    return true;
 
   return false;
 }
@@ -1457,9 +1882,31 @@ function collapseTerminalBlankLines(text: string): string {
     const isTermCodeLine = (ln: string): boolean => {
       if (!ln.startsWith(' ') || ln.trim() === '') return false;
       const indent = ln.match(/^(\s*)/)?.[1].length ?? 0;
-      if (indent <= 4) return true; // typical Rich panel indentation
-      // Heavily indented — only treat as code if it looks like code/YAML
       const t = ln.trim();
+      if (indent <= 4) {
+        // Typical Rich panel indentation.  However, Rich also renders bold
+        // section headings with 1-space indent (e.g. " Kubernetes manifests
+        // (Namespace + ...)") — those are prose, not code.  Distinguish by
+        // checking if the content actually looks like code or YAML.
+        if (looksLikeShellOrDockerCodeLine(t) || looksLikeYaml(t)) return true;
+        // Short lines that are just YAML values/keys also count
+        if (/^[\w.-]+:\s/.test(t) || /^---\s*$/.test(t) || /^- /.test(t)) return true;
+        // If the line has many words and doesn't look like code/YAML, it's prose
+        const wordCount = t.split(/\s+/).length;
+        if (
+          wordCount >= PROSE_WORD_THRESHOLD &&
+          !looksLikeShellOrDockerCodeLine(t) &&
+          !looksLikeYaml(t)
+        )
+          return false;
+        // Ordered list items (" 1 Create...", " 2 Apply...") are prose, not code
+        if (/^\d+\s+\S/.test(t)) return false;
+        // Multi-word prose headings ending with colon (e.g. "Also confirm:",
+        // "Build + push:") are prose, not code.
+        if (isProseHeadingEndingWithColon(t)) return false;
+        return true; // default: treat as code for short lines
+      }
+      // Heavily indented — only treat as code if it looks like code/YAML
       return looksLikeShellOrDockerCodeLine(t) || looksLikeYaml(t);
     };
     const prevIsTermCode = isTermCodeLine(prevLine);
@@ -1469,6 +1916,13 @@ function collapseTerminalBlankLines(text: string): string {
       // Both sides are terminal-formatted code lines
       if (blankCount <= 1) {
         // Single blank = terminal chunk artefact → drop entirely
+        // EXCEPT: preserve when next line is a file header comment
+        // (e.g. "# Cargo.toml", "// src/main.rs") to keep a blank line
+        // at file-type boundaries so normalizeTerminalMarkdown can split
+        // the code into separate blocks.
+        if (isFileHeaderComment(nextLine.trim())) {
+          result.push('');
+        }
         collapsedCount++;
       } else {
         // Multiple blanks = intentional blank in source code → keep one
@@ -1535,12 +1989,339 @@ function normalizeTerminalMarkdown(text: string): string {
       continue;
     }
 
-    if (/^\s+\d+\s+\S/.test(line)) {
-      const converted = line.replace(/^\s+(\d+)\s+/, '$1. ');
+    if (/^\s*\d+\s+\S/.test(line) && !/=>/.test(line)) {
+      const converted = line.replace(/^\s*(\d+)\s+/, '$1. ');
       if (converted !== line) {
         orderedListCount++;
         result.push(converted);
         i++;
+        continue;
+      }
+    }
+
+    // Detect Makefile directives/targets at column 0: .PHONY lines, bare
+    // targets, and targets with dependencies. Wrap the target/directive lines
+    // and their tab-indented recipes in a code block.
+    if (!/^\s+/.test(line) && startsMakefileBlock(lines, i)) {
+      const makefileLines: string[] = [line];
+      let mj = i + 1;
+      while (mj < lines.length) {
+        const ml = lines[mj];
+        const mt = ml.trim();
+        if (mt === '') break;
+        // Makefile recipe (tab-indented) or another directive/target line.
+        if (/^\s*\t/.test(ml) || isMakefileDirective(mt) || looksLikeMakefileTarget(mt)) {
+          makefileLines.push(ml);
+          mj++;
+          continue;
+        }
+        break;
+      }
+      result.push('```');
+      for (const ml of makefileLines) result.push(ml);
+      result.push('```');
+      wrappedCodeBlockCount++;
+      i = mj;
+      continue;
+    }
+
+    // Recover terminal panel blocks whose first content line lost its leading
+    // space because extractAIAnswer() trims the overall response. This shows up
+    // as: first line at column 0 that looks like code, followed by shallow
+    // (1–2 space) code lines from the same Rich panel.
+    //
+    // Skip when the previous non-blank line was also a column-0 code line —
+    // that means we're in the middle of a multi-line bare code block (e.g.
+    // a Python file with `def root():` after `@app.get("/")`).  The whole
+    // block is better handled as one unit by wrapBareCodeBlocks later.
+    const prevNonBlankLine = (() => {
+      for (let pi = i - 1; pi >= 0; pi--) {
+        if (lines[pi].trim() !== '') return lines[pi];
+      }
+      return '';
+    })();
+    const prevIsCol0Code =
+      prevNonBlankLine !== '' &&
+      !/^\s+/.test(prevNonBlankLine) &&
+      looksLikeShellOrDockerCodeLine(prevNonBlankLine.trim()) &&
+      !looksLikeYaml(prevNonBlankLine.trim());
+    if (
+      !/^\s+/.test(line) &&
+      looksLikeShellOrDockerCodeLine(trimmed) &&
+      !looksLikeYaml(trimmed) &&
+      !prevIsCol0Code &&
+      i + 1 < lines.length
+    ) {
+      const nextLine = lines[i + 1];
+      const nextTrimmed = nextLine.trim();
+      const nextIndent = nextLine.match(/^(\s*)/)?.[1].length ?? 0;
+      if (
+        nextIndent > 0 &&
+        nextIndent <= 6 &&
+        (looksLikeShellOrDockerCodeLine(nextTrimmed) || nextTrimmed !== '')
+      ) {
+        const panelLines: string[] = [line];
+        // Track if block starts with shell prompt — command output should
+        // stay together even for non-code/non-YAML lines
+        const panelStartsWithPrompt = /^\$\s+\w/.test(trimmed);
+        let pj = i + 1;
+        while (pj < lines.length) {
+          const pl = lines[pj];
+          const pt = pl.trim();
+          const indent = pl.match(/^(\s*)/)?.[1].length ?? 0;
+          if (pt === '') {
+            // Allow single blank lines inside the panel block
+            if (pj + 1 < lines.length && lines[pj + 1].trim() !== '') {
+              panelLines.push(pl);
+              pj++;
+              continue;
+            }
+            break;
+          }
+          // Break at prose headings ending with colon (e.g. "Also confirm:",
+          // "Build + push:").  These are clearly not code/YAML panel content.
+          if (isProseHeadingEndingWithColon(pt)) {
+            break;
+          }
+          // Break at capitalized single-word headings (e.g. "Assumptions:",
+          // "Prerequisites:", "Requirements:") when the previously collected
+          // content contains code (function definitions, imports, braces).
+          // This distinguishes prose section headings from kubectl output labels
+          // like "Events:", "Status:" which follow other structured output.
+          if (
+            CAPITALIZED_HEADING_RE.test(pt) &&
+            !looksLikeShellOrDockerCodeLine(pt) &&
+            blockContainsCode(panelLines)
+          ) {
+            break;
+          }
+          // Break at numbered step headers (e.g. "2) Containerize (multi-stage
+          // Dockerfile)").  These are section headings, not code, even when
+          // indented after a code block.
+          if (/^\d+[.)]\s+\S/.test(pt) && !looksLikeShellOrDockerCodeLine(pt)) {
+            break;
+          }
+          if (
+            indent > 0 &&
+            indent <= 6 &&
+            (looksLikeShellOrDockerCodeLine(pt) || looksLikeYaml(pt) || /^\s/.test(pl))
+          ) {
+            panelLines.push(pl);
+            pj++;
+            continue;
+          }
+          // Shell prompt blocks: keep any non-blank continuation line as
+          // command output (e.g. helm status fields like "LAST DEPLOYED: ...",
+          // kubectl rollout messages, Docker build steps)
+          if (panelStartsWithPrompt && indent > 0 && indent <= 6 && pt !== '') {
+            panelLines.push(pl);
+            pj++;
+            continue;
+          }
+          // Also keep closing braces/brackets
+          if (/^\s*[}\]]\s*;?\s*$/.test(pl)) {
+            panelLines.push(pl);
+            pj++;
+            continue;
+          }
+          break;
+        }
+        // Only wrap if we collected more than just the first line
+        if (panelLines.length > 1) {
+          result.push('```');
+          for (const pl of panelLines) result.push(pl);
+          result.push('```');
+          wrappedCodeBlockCount++;
+          i = pj;
+          continue;
+        }
+      }
+    }
+
+    // ── Panel shell-prompt recovery: 1-space-indented shell prompt from Rich panels ──
+    // When a Rich panel line starts with " $ command" (1-space indent + shell prompt),
+    // collect the prompt and all following 1-space-indented lines as command output.
+    // This handles helm status, kubectl rollout, Docker build output, etc.
+    const prevLineBlankForPrompt = i === 0 || lines[i - 1].trim() === '';
+    if (prevLineBlankForPrompt && /^ \$\s+\w/.test(line) && i + 1 < lines.length) {
+      const promptPanelLines: string[] = [line];
+      let ppj = i + 1;
+      while (ppj < lines.length) {
+        const ppl = lines[ppj];
+        const ppt = ppl.trim();
+        const ppIndent = ppl.match(/^(\s*)/)?.[1].length ?? 0;
+        if (ppt === '') {
+          // Allow single blank lines
+          if (
+            ppj + 1 < lines.length &&
+            /^\s/.test(lines[ppj + 1]) &&
+            lines[ppj + 1].trim() !== ''
+          ) {
+            promptPanelLines.push(ppl);
+            ppj++;
+            continue;
+          }
+          break;
+        }
+        // Keep any indented non-blank continuation (command output)
+        if (ppIndent > 0 && ppIndent <= 6) {
+          promptPanelLines.push(ppl);
+          ppj++;
+          continue;
+        }
+        break;
+      }
+      if (promptPanelLines.length > 1) {
+        const nonBlank = promptPanelLines.filter(l => l.trim() !== '');
+        const minIndent = nonBlank.reduce(
+          (min, l) => Math.min(min, l.match(/^(\s*)/)?.[1].length ?? 0),
+          Infinity
+        );
+        const shift = minIndent === Infinity ? 0 : minIndent;
+        result.push('```');
+        for (const ppl of promptPanelLines) {
+          result.push(ppl.trim() === '' ? '' : ppl.slice(shift));
+        }
+        result.push('```');
+        wrappedCodeBlockCount++;
+        i = ppj;
+        continue;
+      }
+    }
+
+    // ── Panel code recovery: 1-2 space indented code from Rich panels ──
+    // When Rich panel content at 1-2 space indent contains K8s output patterns
+    // (resource/action output, klog, logfmt) that aren't detected by other paths,
+    // collect and wrap in fences.  Only trigger after a blank line.
+    // Use a narrow set of patterns to avoid interfering with the bold-file-heading
+    // and indented-block collector paths that handle general code.
+    const prevLineBlankForCode = i === 0 || lines[i - 1].trim() === '';
+    if (
+      prevLineBlankForCode &&
+      /^ {1,2}\S/.test(line) &&
+      looksLikeShellOrDockerCodeLine(trimmed) &&
+      !looksLikeYaml(trimmed) &&
+      // Only trigger for K8s output patterns that other paths miss
+      (/^[\w.-]+\/[\w.-]+\s+(created|configured|unchanged|deleted|scaled|patched|annotated|labeled|exposed)\s*$/.test(
+        trimmed
+      ) ||
+        /^[IWEF]\d{4}\s+\d{2}:\d{2}:\d{2}/.test(trimmed) ||
+        /^(level|ts|time|msg)=\S/.test(trimmed) ||
+        /\b(rate|sum|histogram_quantile|avg|count)\(/.test(trimmed) ||
+        /^[a-z_][a-z0-9_]*\{[^}]+\}\s+\S/.test(trimmed) ||
+        /^(Pulling|Pulled|Created|Started|Killing|Stopped|Attached|Detached|Scheduled|FailedScheduling)\s/.test(
+          trimmed
+        ) ||
+        /^(Successfully\s+assigned|Container\s+image\s+")/.test(trimmed) ||
+        /^(Readiness|Liveness|Startup)\s+probe\s+failed:/.test(trimmed) ||
+        /^\d+\/\d+\s+nodes\s+are\s+available:/.test(trimmed) ||
+        /^(Insufficient\s+(cpu|memory)|node\(s\)\s+(had|did\s+not\s+match))/.test(trimmed) ||
+        /^(stdout|stderr)\s+F\s+/.test(trimmed) ||
+        /^(MountVolume\.|AttachVolume\.|Failed\s+to\s+pull|Error\s+response\s+from|Unable\s+to\s+attach)/.test(
+          trimmed
+        ) ||
+        /^(Back-off\s+restarting|Killing\s+container\s+with)/.test(trimmed) ||
+        /^Container\s+\S+.*\b(definition\s+changed|failed\s+liveness\s+probe)/.test(trimmed) ||
+        /^[a-z][\w]*\.[a-z][\w]*=\S/.test(trimmed) ||
+        /^Normal\s+\w+\s+\d/.test(trimmed)) &&
+      i + 1 < lines.length
+    ) {
+      const codePanelLines: string[] = [line];
+      let cpj = i + 1;
+      while (cpj < lines.length) {
+        const cpl = lines[cpj];
+        const cpt = cpl.trim();
+        const cpIndent = cpl.match(/^(\s*)/)?.[1].length ?? 0;
+        if (cpt === '') break;
+        if (
+          cpIndent > 0 &&
+          cpIndent <= 6 &&
+          (looksLikeShellOrDockerCodeLine(cpt) || looksLikeYaml(cpt))
+        ) {
+          codePanelLines.push(cpl);
+          cpj++;
+          continue;
+        }
+        break;
+      }
+      if (codePanelLines.length >= 2) {
+        const nonBlank = codePanelLines.filter(l => l.trim() !== '');
+        const minIndent = nonBlank.reduce(
+          (min, l) => Math.min(min, l.match(/^(\s*)/)?.[1].length ?? 0),
+          Infinity
+        );
+        const shift = minIndent === Infinity ? 0 : minIndent;
+        result.push('```');
+        for (const cpl of codePanelLines) {
+          result.push(cpl.trim() === '' ? '' : cpl.slice(shift));
+        }
+        result.push('```');
+        wrappedCodeBlockCount++;
+        i = cpj;
+        continue;
+      }
+    }
+
+    // ── Panel YAML recovery: shallow-indented (1-space) YAML from Rich panels ──
+    // When Rich panel content has no bold file heading, YAML lines arrive with
+    // 1-space indent after ANSI stripping.  Collect runs of 1-space-indented YAML
+    // and wrap them in ```yaml fences with dedentation.
+    // Only trigger after a blank line (start of a new section) to avoid intercepting
+    // YAML that's part of a bold-file-heading block or other context.
+    const prevLineBlank = i === 0 || lines[i - 1].trim() === '';
+    if (
+      prevLineBlank &&
+      /^ {1,2}\S/.test(line) &&
+      looksLikeYaml(trimmed) &&
+      !looksLikeShellOrDockerCodeLine(trimmed) &&
+      !/^\s*apiVersion:\s/.test(line) &&
+      i + 1 < lines.length
+    ) {
+      const yamlPanelLines: string[] = [line];
+      let yj = i + 1;
+      let hasApiVersion = false;
+      // Track the indent of the first line to distinguish top-level apiVersion:
+      // from deeply nested ones (e.g. inside patchesStrategicMerge:)
+      const firstLineIndent = line.match(/^(\s*)/)?.[1].length ?? 0;
+      while (yj < lines.length) {
+        const yl = lines[yj];
+        const yt = yl.trim();
+        // Only count apiVersion: at the same indent level as the first line
+        // (top-level K8s manifest); ignore deeply nested ones inside patches
+        const apiIndent = yl.match(/^(\s*)/)?.[1].length ?? 0;
+        if (/^\s*apiVersion:\s/.test(yl) && apiIndent <= firstLineIndent + 1) hasApiVersion = true;
+        if (yt === '') {
+          // Allow blank lines if followed by more indented content
+          if (yj + 1 < lines.length && /^\s/.test(lines[yj + 1]) && lines[yj + 1].trim() !== '') {
+            yamlPanelLines.push(yl);
+            yj++;
+            continue;
+          }
+          break;
+        }
+        if (/^\s/.test(yl) && (looksLikeYaml(yt) || /^\s{2,}/.test(yl))) {
+          yamlPanelLines.push(yl);
+          yj++;
+          continue;
+        }
+        break;
+      }
+      // Only wrap if: 3+ lines, no K8s apiVersion (let wrapBareYamlBlocks handle that),
+      // and not a single-key YAML-like line
+      if (yamlPanelLines.length >= 3 && !hasApiVersion) {
+        const nonBlank = yamlPanelLines.filter(l => l.trim() !== '');
+        const minIndent = nonBlank.reduce(
+          (min, l) => Math.min(min, l.match(/^(\s*)/)?.[1].length ?? 0),
+          Infinity
+        );
+        const shift = minIndent === Infinity ? 0 : minIndent;
+        result.push('```yaml');
+        for (const yl of yamlPanelLines) {
+          result.push(yl.trim() === '' ? '' : yl.slice(shift));
+        }
+        result.push('```');
+        wrappedCodeBlockCount++;
+        i = yj;
         continue;
       }
     }
@@ -1551,7 +2332,8 @@ function normalizeTerminalMarkdown(text: string): string {
       /^\s{6,}\S/.test(line) &&
       prevTrimmed === '' &&
       nextTrimmed === '' &&
-      !looksLikeShellOrDockerCodeLine(trimmed)
+      !looksLikeShellOrDockerCodeLine(trimmed) &&
+      !isBoldFileHeading(trimmed)
     ) {
       trimmedHeadingCount++;
       result.push(trimmed);
@@ -1559,11 +2341,235 @@ function normalizeTerminalMarkdown(text: string): string {
       continue;
     }
 
-    if (/^\s+\S/.test(line) && looksLikeShellOrDockerCodeLine(trimmed)) {
+    // Bold file headings (e.g. "Cargo.toml", "src/main.rs", "Dockerfile")
+    // Rich terminal renders these as bold text outside code panels.
+    // After ANSI stripping they appear as bare filenames on their own line
+    // (possibly centered with leading whitespace), followed by a blank line
+    // and then space-prefixed code content.
+    // Emit the heading, then collect subsequent space-prefixed lines as a
+    // code block (the content may be TOML, Rust, Dockerfile, etc.).
+    if (isBoldFileHeading(trimmed)) {
+      // Emit the heading (trimmed if centered with whitespace)
+      result.push(trimmed);
+      i++;
+      // Skip blank lines after the heading
+      while (i < lines.length && lines[i].trim() === '') {
+        result.push(lines[i]);
+        i++;
+      }
+      // Collect space-prefixed content lines as a code block
+      if (i < lines.length && /^\s+\S/.test(lines[i])) {
+        const blockLines: string[] = [];
+        let j = i;
+        // Track YAML literal/folded block scalars (| or >) so that their
+        // indented content is never mistaken for prose headings.
+        let inLiteralBlock = false;
+        let literalBlockIndent = 0;
+        while (j < lines.length) {
+          const bl = lines[j];
+          const bt = bl.trim();
+          if (bt === '') {
+            // Blank lines inside literal blocks are part of the scalar
+            if (inLiteralBlock) {
+              blockLines.push(bl);
+              j++;
+              continue;
+            }
+            // Allow single blank lines within the block
+            let peekIdx = j + 1;
+            while (peekIdx < lines.length && lines[peekIdx].trim() === '') peekIdx++;
+            const blankCount = peekIdx - j;
+            if (blankCount >= 2 || peekIdx >= lines.length) break;
+            const peekLine = lines[peekIdx];
+            const peekTrimmed = peekLine.trim();
+            if (!/^\s+\S/.test(peekLine)) break;
+            // Break at next file heading boundary
+            if (isBoldFileHeading(peekTrimmed)) break;
+            // Break at centered headings (deeply indented non-code content,
+            // e.g. "                 2) Containerize it ..." section headings
+            // or "                           Optional: Ingress" title headings).
+            // Code panel content typically has 1-8 spaces indent; centered
+            // headings have 6+ and look like prose.  Only break when the line
+            // has multiple words and no code-like characters — deeply indented
+            // code (Rust assert_eq!, XML tags, nested blocks) must not break.
+            // Also break when the line looks like a section title with a colon
+            // (e.g. "Optional: Ingress") — these match looksLikeYaml but are
+            // clearly headings, not YAML data.
+            const peekIndent = peekLine.match(/^(\s*)/)?.[1].length ?? 0;
+            const peekWords = peekTrimmed.split(/\s+/).length;
+            // Detect centered titles: "Optional: Ingress", "1) Deploy to K8s",
+            // "Step 2: Configure", "3. Deploy to Kubernetes"
+            const isCenteredTitle =
+              peekIndent > 6 &&
+              peekWords >= 2 &&
+              !looksLikeShellOrDockerCodeLine(peekTrimmed) &&
+              (/^[A-Z][\w]*:\s+\S/.test(peekTrimmed) ||
+                /^\d+[.)]\s+\S/.test(peekTrimmed) ||
+                /^Step\s+\d+/i.test(peekTrimmed)) &&
+              peekWords <= 8;
+            if (
+              isCenteredTitle ||
+              (peekIndent > 6 &&
+                peekWords >= PROSE_WORD_THRESHOLD &&
+                !looksLikeShellOrDockerCodeLine(peekTrimmed) &&
+                !looksLikeYaml(peekTrimmed) &&
+                !/[{};=<>[\]]/.test(peekTrimmed)) ||
+              // Also break at prose-like headings at any indent level
+              // (e.g. "  Build + push (example with Docker Hub):" at 2-space indent)
+              (peekWords >= PROSE_WORD_THRESHOLD &&
+                !looksLikeShellOrDockerCodeLine(peekTrimmed) &&
+                !looksLikeYaml(peekTrimmed) &&
+                !/[{};=<>[\].$`"'\\|@#!]/.test(peekTrimmed) &&
+                !/--\w/.test(peekTrimmed))
+            )
+              break;
+            blockLines.push(bl);
+            j++;
+            continue;
+          }
+          if (!/^\s+\S/.test(bl)) break;
+          // Break at next bold file heading (e.g. " src/main.rs" after Cargo.toml panel)
+          if (isBoldFileHeading(bt)) break;
+
+          // Inside a YAML literal/folded block scalar: include all lines
+          // that are indented deeper than the indicator line.
+          if (inLiteralBlock) {
+            const curIndent = bl.match(/^(\s*)/)?.[1].length ?? 0;
+            if (curIndent > literalBlockIndent) {
+              blockLines.push(bl);
+              j++;
+              continue;
+            }
+            // Indentation dropped — exit literal block
+            inLiteralBlock = false;
+          }
+
+          // Also break at centered headings appearing directly (no blank line)
+          // but only when it actually looks like prose (many words, no code chars)
+          // or a short title heading like "Optional: Ingress"
+          const lineIndent = bl.match(/^(\s*)/)?.[1].length ?? 0;
+          const lineWords = bt.split(/\s+/).length;
+          const isDirectCenteredTitle =
+            lineIndent > 6 &&
+            lineWords >= 2 &&
+            !looksLikeShellOrDockerCodeLine(bt) &&
+            (/^[A-Z][\w]*:\s+\S/.test(bt) || /^\d+[.)]\s+\S/.test(bt) || /^Step\s+\d+/i.test(bt)) &&
+            lineWords <= 8;
+          // Break at prose-like lines (many words, no code/YAML patterns).
+          // These may appear at any indent level — Rich terminal bold headings
+          // like "Build + push (example with Docker Hub):" have just 2 spaces.
+          // Exclude lines with code-like chars (flags, operators, braces, dots)
+          // to avoid breaking multiline strings and Makefile targets.
+          const isProseHeading =
+            lineWords >= PROSE_WORD_THRESHOLD &&
+            !looksLikeShellOrDockerCodeLine(bt) &&
+            !looksLikeYaml(bt) &&
+            !/[{};=<>[\].$`"'\\|@#!]/.test(bt) &&
+            !/--\w/.test(bt);
+          if (isDirectCenteredTitle || isProseHeading) break;
+          blockLines.push(bl);
+          // Track start of YAML literal/folded block scalar (e.g. "key: |")
+          if (/[|>][-+]?\d?\s*$/.test(bt)) {
+            inLiteralBlock = true;
+            literalBlockIndent = lineIndent;
+          }
+          j++;
+        }
+        // Trim trailing blank lines
+        while (blockLines.length > 0 && blockLines[blockLines.length - 1].trim() === '') {
+          blockLines.pop();
+        }
+        if (blockLines.length > 0) {
+          result.push('```');
+          for (const bl of blockLines) result.push(bl);
+          result.push('```');
+          i = j;
+          continue;
+        }
+      }
+      continue;
+    }
+
+    // Also start indented code blocks when panel content (1–4 space indent)
+    // looks like YAML data (key: value, - item, etc.).  Deeper indentation
+    // (centered headings at 6+ spaces) is excluded to avoid false positives.
+    // Ordered list items (e.g. " 1 Create...", " 2 Apply...") are excluded.
+    const lineIndentN = line.match(/^(\s*)/)?.[1].length ?? 0;
+    if (
+      /^\s+\S/.test(line) &&
+      !/^\s*\d+\s+\S/.test(line) &&
+      (looksLikeShellOrDockerCodeLine(trimmed) ||
+        isFileHeaderComment(trimmed) ||
+        (lineIndentN <= 4 && looksLikeYaml(trimmed) && trimmed !== '---'))
+    ) {
+      // Don't wrap indented lines that are Python function/class/if bodies.
+      // If the previous non-blank line is an unindented Python block opener
+      // (e.g. "def index():", "if __name__:"), this line is part of its body
+      // and should be left for wrapBareCodeBlocks to handle as one block.
+      let prevNonBlankLine = '';
+      for (let p = i - 1; p >= 0; p--) {
+        const pt = lines[p].trim();
+        if (pt !== '' && !/^```/.test(pt)) {
+          prevNonBlankLine = lines[p];
+          break;
+        }
+      }
+      const prevTrim = prevNonBlankLine.trim();
+      // Check if previous non-blank line is a block opener — either
+      // Python-style (ends with :) or C-family (ends with {).
+      // If so, this indented line is a body continuation and should
+      // be left for wrapBareCodeBlocks to handle as one unified block.
+      const prevIsBlockOpener =
+        prevTrim !== '' &&
+        /[{:]\s*$/.test(prevTrim) &&
+        !/^\s+/.test(prevNonBlankLine) &&
+        looksLikeShellOrDockerCodeLine(prevTrim);
+      if (prevIsBlockOpener) {
+        // Leave for wrapBareCodeBlocks to handle
+        result.push(line);
+        i++;
+        continue;
+      }
+
+      // Skip capitalized single-word prose headings (e.g. "Assumptions:",
+      // "Prerequisites:") when the following non-blank content is code.
+      // These are section headings, not YAML keys that should start a block.
+      // This prevents "Assumptions:" from merging with subsequent Dockerfile
+      // or shell code into a single code block.
+      if (CAPITALIZED_HEADING_RE.test(trimmed) && !looksLikeShellOrDockerCodeLine(trimmed)) {
+        let peekNext = i + 1;
+        while (peekNext < lines.length && lines[peekNext].trim() === '') peekNext++;
+        if (
+          peekNext < lines.length &&
+          looksLikeShellOrDockerCodeLine(lines[peekNext].trim()) &&
+          !looksLikeYaml(lines[peekNext].trim())
+        ) {
+          // Prose heading before code — emit as-is, don't start indented block
+          result.push(line);
+          i++;
+          continue;
+        }
+      }
+
       const blockLines: string[] = [];
       let j = i;
       let codeLikeLineCount = 0;
+      let braceDepth = 0;
       const baseIndent = line.match(/^(\s*)/)?.[1].length ?? 0;
+      // Track whether this block was started by a file header comment
+      // (e.g. "# Cargo.toml"): if so, we collect ALL space-prefixed lines
+      // regardless of whether they match looksLikeShellOrDockerCodeLine,
+      // since the content may be TOML, INI, or other config that has no
+      // shell/Dockerfile syntax markers.
+      const startedByFileHeader = isFileHeaderComment(trimmed);
+      if (startedByFileHeader) {
+        codeLikeLineCount++; // count the file header itself
+      }
+      // Track YAML literal/folded block scalars (| or >) inside indented blocks
+      // so that deeply indented content (e.g. embedded bash scripts in ConfigMaps)
+      // is not broken out of the block by the deep-indent check.
+      let indBlockInLiteral = false;
+      let indBlockLiteralIndent = 0;
 
       while (j < lines.length) {
         const blockLine = lines[j];
@@ -1573,15 +2579,64 @@ function normalizeTerminalMarkdown(text: string): string {
           // Peek ahead: if next non-blank line isn't code-like, stop here
           let peekIdx = j + 1;
           while (peekIdx < lines.length && lines[peekIdx].trim() === '') peekIdx++;
+
+          const trimTrailingBlanks = () => {
+            while (blockLines.length > 0 && blockLines[blockLines.length - 1].trim() === '') {
+              blockLines.pop();
+            }
+          };
+
           if (peekIdx < lines.length) {
             const peekTrimmed = lines[peekIdx].trim();
-            if (!looksLikeShellOrDockerCodeLine(peekTrimmed)) {
-              // Trim trailing blank lines already in blockLines
-              while (blockLines.length > 0 && blockLines[blockLines.length - 1].trim() === '') {
-                blockLines.pop();
-              }
+            const peekLine = lines[peekIdx];
+            // Break at file-type boundaries: a blank line followed by a
+            // "file header" comment (e.g. "# Cargo.toml", "// src/main.rs")
+            // signals a transition to different file content.
+            if (isFileHeaderComment(peekTrimmed)) {
+              trimTrailingBlanks();
               break;
             }
+            // For file-header blocks (started by e.g. "# Cargo.toml"):
+            // allow blank lines within the block (config/source files
+            // often contain them), but break if the next content is no
+            // longer space-prefixed (left the terminal code area) or
+            // two consecutive blank lines were found.
+            if (startedByFileHeader) {
+              const blankLineCount = peekIdx - j;
+              if (blankLineCount >= 2 || !/^\s+\S/.test(peekLine)) {
+                trimTrailingBlanks();
+                break;
+              }
+            } else if (!looksLikeShellOrDockerCodeLine(peekTrimmed)) {
+              // Non-file-header blocks: break when peek line doesn't look like code.
+              trimTrailingBlanks();
+              break;
+            } else if (
+              // Break at YAML-to-code boundary: block has apiVersion: and
+              // peek line is code but NOT YAML — transition from K8s
+              // manifest to shell commands (e.g. kubectl apply after YAML).
+              blockLines.some(l => /^\s*apiVersion:\s/.test(l)) &&
+              !looksLikeYaml(peekTrimmed)
+            ) {
+              trimTrailingBlanks();
+              break;
+            } else if (
+              // Break when a block started with a capitalized prose heading
+              // (e.g. "Assumptions:", "Prerequisites:") and the peek line
+              // is code — the heading was a prose section label, not a YAML
+              // key.  Without this check, "Assumptions:" followed by a blank
+              // line and Dockerfile content merges into one code block.
+              blockLines.length === 1 &&
+              CAPITALIZED_HEADING_RE.test(blockLines[0].trim()) &&
+              looksLikeShellOrDockerCodeLine(peekTrimmed) &&
+              !looksLikeYaml(peekTrimmed)
+            ) {
+              trimTrailingBlanks();
+              break;
+            }
+          } else if (startedByFileHeader) {
+            trimTrailingBlanks();
+            break;
           }
           blockLines.push(blockLine);
           j++;
@@ -1592,9 +2647,77 @@ function normalizeTerminalMarkdown(text: string): string {
           break;
         }
 
+        // Track brace/bracket depth for nested JSON/config blocks
+        // (must be computed before prose and deep-indent checks)
+        for (const ch of blockTrimmed) {
+          if (ch === '{' || ch === '[') braceDepth++;
+          if (ch === '}' || ch === ']') braceDepth--;
+        }
+
+        // Stop at prose lines: if the trimmed content is long (5+ words),
+        // doesn't look like code/YAML, and isn't a continuation of the
+        // previous code, it's likely a wrapped bold heading or description
+        // (e.g. "Kubernetes manifests (Namespace + ConfigMap + ...)").
+        const blockWords = blockTrimmed.split(/\s+/).length;
+        if (
+          !startedByFileHeader &&
+          blockWords >= PROSE_WORD_THRESHOLD &&
+          !looksLikeShellOrDockerCodeLine(blockTrimmed) &&
+          !looksLikeYaml(blockTrimmed) &&
+          !/[{[\]]\s*$/.test(blockTrimmed)
+        ) {
+          break;
+        }
+
+        // Also break at short prose headings ending with colon that don't
+        // match YAML key patterns (e.g. "Also confirm:", "Build + push:").
+        // These are too short for the PROSE_WORD_THRESHOLD check above but
+        // are clearly prose headings, not code or YAML data.  Exclude lines
+        // Also break at short prose headings ending with colon
+        // (e.g. "Also confirm:", "Build + push:").
+        if (!startedByFileHeader && isProseHeadingEndingWithColon(blockTrimmed)) {
+          break;
+        }
+
+        // Break at capitalized single-word headings (e.g. "Assumptions:",
+        // "Prerequisites:", "Requirements:") when the block already contains
+        // code (function definitions, imports, braces).  These are prose
+        // section headings, not YAML keys.  Without this check, blank line
+        // collapsing merges code and headings, and the heading gets absorbed
+        // into the code block (e.g. Go code + "Assumptions:" + Dockerfile).
+        if (
+          !startedByFileHeader &&
+          CAPITALIZED_HEADING_RE.test(blockTrimmed) &&
+          !looksLikeShellOrDockerCodeLine(blockTrimmed) &&
+          blockContainsCode(blockLines)
+        ) {
+          break;
+        }
+
         // Stop at heavily-indented non-code lines (centered headings)
+        // Skip this check for file-header blocks since config/YAML files
+        // commonly have deep indentation.
+        // Also skip when inside a YAML literal/folded block scalar (| or >)
+        // since the content may be embedded scripts at deeper indentation.
         const lineIndent = blockLine.match(/^(\s*)/)?.[1].length ?? 0;
-        if (lineIndent > baseIndent + 4 && !looksLikeShellOrDockerCodeLine(blockTrimmed)) {
+        if (indBlockInLiteral) {
+          if (lineIndent > indBlockLiteralIndent) {
+            // Still inside literal block — don't count code-like lines
+            // (e.g. embedded ConfigMap scripts) as they're scalar content.
+            blockLines.push(blockLine);
+            j++;
+            continue;
+          }
+          indBlockInLiteral = false;
+        }
+        if (
+          !startedByFileHeader &&
+          lineIndent > baseIndent + 4 &&
+          !looksLikeShellOrDockerCodeLine(blockTrimmed) &&
+          !looksLikeYaml(blockTrimmed) &&
+          braceDepth <= 0 &&
+          !hasStructuredCodeContext(blockLines)
+        ) {
           break;
         }
 
@@ -1603,6 +2726,11 @@ function normalizeTerminalMarkdown(text: string): string {
         }
 
         blockLines.push(blockLine);
+        // Track start of YAML literal/folded block scalar (e.g. "key: |")
+        if (/[|>][-+]?\d?\s*$/.test(blockTrimmed)) {
+          indBlockInLiteral = true;
+          indBlockLiteralIndent = lineIndent;
+        }
         j++;
       }
 
@@ -1612,19 +2740,113 @@ function normalizeTerminalMarkdown(text: string): string {
       }
 
       if (codeLikeLineCount >= 1) {
-        const nonBlank = blockLines.filter(l => l.trim() !== '');
-        const minIndent = nonBlank.reduce((min, l) => {
-          const indent = l.match(/^(\s*)/)?.[1].length ?? 0;
-          return Math.min(min, indent);
-        }, Infinity);
-        const shift = minIndent === Infinity ? 0 : minIndent;
-        const dedented = blockLines.map(l => (l.trim() === '' ? '' : l.slice(shift)));
-        result.push('```');
-        result.push(...dedented);
-        result.push('```');
-        wrappedCodeBlockCount++;
-        i = j;
-        continue;
+        // Don't wrap small fragments if they're surrounded by YAML-like content.
+        // Terminal line wrapping (80 chars) can split long YAML comments into
+        // fragments that look like shell code (e.g. "call /api/*" from a split
+        // "# ... this would call /api/*").  Wrapping these fragments in code
+        // fences breaks the surrounding YAML block.
+        let prevContentTrimmed = '';
+        for (let p = i - 1; p >= 0; p--) {
+          const pt = lines[p].trim();
+          if (pt !== '' && !/^```/.test(pt)) {
+            prevContentTrimmed = pt;
+            break;
+          }
+        }
+        let nextContentTrimmed = '';
+        for (let n = j; n < lines.length; n++) {
+          const nt = lines[n].trim();
+          if (nt !== '') {
+            nextContentTrimmed = nt;
+            break;
+          }
+        }
+        const prevIsYaml = prevContentTrimmed !== '' && looksLikeYaml(prevContentTrimmed);
+        const nextIsYaml = nextContentTrimmed !== '' && looksLikeYaml(nextContentTrimmed);
+        // Previous line ends with |, |-, |+, >-, |2, etc. → YAML literal/folded
+        // block scalar; all indented lines that follow are scalar content.
+        const prevIsLiteralBlockIndicator = /[|>][-+]?\d?\s*$/.test(prevContentTrimmed);
+        // K8s YAML blocks with apiVersion: at base indent (±2 spaces) and
+        // few code-like fragments should be pushed as-is for wrapBareYamlBlocks.
+        // Block must start with a YAML line (not code like "cat <<EOF") to
+        // distinguish standalone K8s manifests from embedded YAML.
+        const firstBlockTrimmed = blockLines.length > 0 ? blockLines[0].trim() : '';
+        const blockStartedByCode = looksLikeShellOrDockerCodeLine(firstBlockTrimmed);
+        const hasK8sApiVersion =
+          !blockStartedByCode &&
+          blockLines.some(l => {
+            const indent = l.match(/^(\s*)/)?.[1].length ?? 0;
+            return /^\s*apiVersion:\s/.test(l) && indent <= baseIndent + 2;
+          });
+        const yamlLineCount = blockLines.filter(l => looksLikeYaml(l.trim())).length;
+        const isK8sYamlWithFragments = hasK8sApiVersion && yamlLineCount > codeLikeLineCount * 3;
+        const isFragmentInsideYaml =
+          (codeLikeLineCount <= 2 && prevIsYaml && nextIsYaml) ||
+          prevIsLiteralBlockIndicator ||
+          isK8sYamlWithFragments;
+
+        if (!isFragmentInsideYaml) {
+          const nonBlank = blockLines.filter(l => l.trim() !== '');
+          const minIndent = nonBlank.reduce((min, l) => {
+            const indent = l.match(/^(\s*)/)?.[1].length ?? 0;
+            return Math.min(min, indent);
+          }, Infinity);
+          const shift = minIndent === Infinity ? 0 : minIndent;
+          const dedented = blockLines.map(l => (l.trim() === '' ? '' : l.slice(shift)));
+          result.push('```');
+          result.push(...dedented);
+          result.push('```');
+          wrappedCodeBlockCount++;
+          i = j;
+          continue;
+        } else {
+          // Inside YAML context — don't wrap, but advance past all collected
+          // block lines to prevent re-processing individual lines.
+          result.push(...blockLines);
+          i = j;
+          continue;
+        }
+      }
+      // Pure YAML block (no code-like lines) from Rich panel content —
+      // dedent so that wrapBareYamlBlocks can detect and fence it with
+      // ```yaml.  Only activate for blocks with 3+ YAML lines and a
+      // strong non-K8s YAML indicator to avoid false positives on prose.
+      // K8s YAML (with apiVersion:) is already handled by wrapBareYamlBlocks
+      // and should NOT be dedented here to avoid changing its behavior.
+      if (codeLikeLineCount === 0 && blockLines.length >= 3) {
+        const yamlCount = blockLines.filter(l => {
+          const t = l.trim();
+          return t !== '' && looksLikeYaml(t);
+        }).length;
+        const hasK8sYaml = blockLines.some(l => /^\s*apiVersion:\s/.test(l));
+        const hasStrongNonK8sYaml =
+          !hasK8sYaml &&
+          blockLines.some(l => {
+            const t = l.trim();
+            return /^(version|services|on):\s?/.test(t);
+          }) &&
+          // Also check the starting line itself — if it's 'name:' it
+          // could be K8s metadata.  Only treat as strong YAML when the
+          // block contains Docker Compose / GitHub Actions indicators.
+          blockLines.some(l => {
+            const t = l.trim();
+            return (
+              /^(version|services|on|jobs|steps|runs-on):\s?/.test(t) ||
+              /^(build|image|ports|environment|depends_on):\s?/.test(t)
+            );
+          });
+        if (yamlCount >= 3 && hasStrongNonK8sYaml) {
+          const nonBlank = blockLines.filter(l => l.trim() !== '');
+          const minIndent = nonBlank.reduce((min, l) => {
+            const indent = l.match(/^(\s*)/)?.[1].length ?? 0;
+            return Math.min(min, indent);
+          }, Infinity);
+          const shift = minIndent === Infinity ? 0 : minIndent;
+          const dedented = blockLines.map(l => (l.trim() === '' ? '' : l.slice(shift)));
+          result.push(...dedented);
+          i = j;
+          continue;
+        }
       }
     }
 
@@ -1652,9 +2874,16 @@ function normalizeTerminalMarkdown(text: string): string {
  * list item, comment, flow-mapping shorthand, etc.).
  */
 function looksLikeYaml(trimmed: string): boolean {
-  if (trimmed === '' || trimmed.startsWith('#')) return true;
+  if (
+    trimmed === '' ||
+    (trimmed.startsWith('#') &&
+      !/^#\s*(include|define|ifdef|ifndef|endif|pragma|undef|if|else|elif)\b/.test(trimmed))
+  )
+    return true;
   // YAML document separator (exactly ---) and document end marker (exactly ...)
   if (trimmed === '---' || trimmed === '...') return true;
+  // YAML merge key: <<: *defaults
+  if (/^<<:\s?/.test(trimmed)) return true;
   // key: or key:  (with optional value)
   if (/^[\w][\w.\/-]*:\s?/.test(trimmed)) return true;
   // quoted key
@@ -1662,13 +2891,47 @@ function looksLikeYaml(trimmed: string): boolean {
   // list item:  - something
   if (/^-\s/.test(trimmed) || trimmed === '-') return true;
   // flow mapping/sequence opener: { ... } or [ ... ]
-  if (/^[{\[]/.test(trimmed)) return true;
+  // Exclude Helm/Go template expressions: {{- if }}, {{ include }}
+  if (
+    /^[{\[]/.test(trimmed) &&
+    !/^\{\{-?\s*(if|else|end|range|with|define|template|block|include)\b/.test(trimmed)
+  )
+    return true;
   // flow mapping/sequence closer: } or ] (continuation from previous line)
   if (/^[}\]]/.test(trimmed)) return true;
   // Quoted scalar value (e.g. "http://..." on its own line after key:)
   if (/^["'][^"']*["']$/.test(trimmed)) return true;
   // continuation value (indented scalar, e.g. multiline string)
   return false;
+}
+
+function isMakefileDirective(trimmed: string): boolean {
+  return /^\.(PHONY|SUFFIXES|DEFAULT_GOAL|PRECIOUS|INTERMEDIATE|SECONDARY|SECONDEXPANSION|DELETE_ON_ERROR|EXPORT_ALL_VARIABLES|NOTPARALLEL|ONESHELL|POSIX):/.test(
+    trimmed
+  );
+}
+
+function looksLikeMakefileTarget(trimmed: string): boolean {
+  return /^[\w./-]+:\s*(?:$|\S.*)$/.test(trimmed);
+}
+
+/**
+ * Check whether the current line starts a Makefile block. We only enter
+ * Makefile mode in real Makefile contexts:
+ *  - a dot-directive followed by a target line, or
+ *  - a target line followed by a tab-indented recipe line.
+ */
+function startsMakefileBlock(lines: string[], index: number): boolean {
+  const trimmed = lines[index].trim();
+  let nextIdx = index + 1;
+  while (nextIdx < lines.length && lines[nextIdx].trim() === '') nextIdx++;
+  if (nextIdx >= lines.length) return false;
+  const nextLine = lines[nextIdx];
+  const nextTrimmed = nextLine.trim();
+  return (
+    (isMakefileDirective(trimmed) && looksLikeMakefileTarget(nextTrimmed)) ||
+    (looksLikeMakefileTarget(trimmed) && /^\s*\t/.test(nextLine))
+  );
 }
 
 /**
@@ -1733,7 +2996,18 @@ function wrapBareYamlBlocks(text: string): string {
     }
 
     // Detect start of a bare YAML block: apiVersion: (with optional value)
-    if (/^\s*apiVersion:\s*/.test(line)) {
+    // Skip if the previous non-blank line is a heredoc operator (cat <<EOF, etc.)
+    // — the YAML content is part of the heredoc body, not a standalone YAML block.
+    let prevNonBlankForHeredoc = '';
+    for (let p = i - 1; p >= 0; p--) {
+      if (lines[p].trim() !== '') {
+        prevNonBlankForHeredoc = lines[p].trim();
+        break;
+      }
+    }
+    const insideHeredoc = /<<-?\s*['"]?\w+['"]?\s*$/.test(prevNonBlankForHeredoc);
+
+    if (/^\s*apiVersion:\s*/.test(line) && !insideHeredoc) {
       verboseLog(
         '[AKS Agent Parse] wrapBareYamlBlocks: detected bare apiVersion: at line',
         i,
@@ -1782,11 +3056,25 @@ function wrapBareYamlBlocks(text: string): string {
       // column 0 after indented YAML).
       const baseIndent = line.match(/^(\s*)/)?.[1].length ?? 0;
 
+      // Track YAML literal/folded block scalars (| or >) — all content
+      // indented deeper than the indicator line is part of the scalar value,
+      // regardless of content (may contain Python, shell, etc.).
+      let inLiteralBlock = false;
+      let literalBlockIndent = 0;
+
       while (j < lines.length) {
         const yl = lines[j];
         const yt = yl.trim();
 
         if (yt === '') {
+          // Inside a YAML literal/folded block scalar (| or >): blank lines
+          // are part of the scalar content and should NOT count toward
+          // the "two consecutive blank lines = end of block" rule.
+          if (inLiteralBlock) {
+            yamlLines.push(yl);
+            j++;
+            continue;
+          }
           consecutiveBlanks++;
           if (consecutiveBlanks >= 2) break; // two blank lines = end of block
           yamlLines.push(yl);
@@ -1794,6 +3082,20 @@ function wrapBareYamlBlocks(text: string): string {
           continue;
         }
         consecutiveBlanks = 0;
+
+        // Inside a YAML literal/folded block scalar (| or >): include
+        // lines that are indented deeper than the indicator, regardless
+        // of their content (they may be Python, shell, etc.).
+        if (inLiteralBlock) {
+          const lineIndent = yl.match(/^(\s*)/)?.[1].length ?? 0;
+          if (lineIndent > literalBlockIndent) {
+            yamlLines.push(yl);
+            j++;
+            continue;
+          }
+          // Indentation dropped — exit literal block
+          inLiteralBlock = false;
+        }
 
         // Check indentation: a non-blank line with less indent than the
         // base apiVersion: line is outside the YAML block, UNLESS it's a
@@ -1811,6 +3113,12 @@ function wrapBareYamlBlocks(text: string): string {
           } else {
             yamlLines.push(yl);
           }
+          // Track start of literal/folded block scalar (e.g. "- |" or "key: |")
+          // Also matches chomping indicators (|-, |+, >-) and explicit indent (|2, >2)
+          if (/[|>][-+]?\d?\s*$/.test(yt)) {
+            inLiteralBlock = true;
+            literalBlockIndent = yl.match(/^(\s*)/)?.[1].length ?? 0;
+          }
           j++;
         } else {
           // Check if this line is a YAML value continuation:
@@ -1819,7 +3127,22 @@ function wrapBareYamlBlocks(text: string): string {
           if (joinYamlContinuation(yamlLines, yt)) {
             j++;
           } else {
-            break;
+            // Peek ahead: if the next non-blank line looks like YAML,
+            // this line may be a terminal line-wrap fragment — include it
+            // to avoid breaking the YAML block.
+            // However, if there's a blank line between this line and the
+            // next YAML, this is a prose paragraph separator — NOT a terminal
+            // wrap — so stop the YAML block here.
+            let peekIdx = j + 1;
+            const hasBlankBefore = peekIdx < lines.length && lines[peekIdx].trim() === '';
+            while (peekIdx < lines.length && lines[peekIdx].trim() === '') peekIdx++;
+            const peekTrimmed = peekIdx < lines.length ? lines[peekIdx].trim() : '';
+            if (peekTrimmed !== '' && looksLikeYaml(peekTrimmed) && !hasBlankBefore) {
+              yamlLines.push(yl);
+              j++;
+            } else {
+              break;
+            }
           }
         }
       }
@@ -1848,6 +3171,211 @@ function wrapBareYamlBlocks(text: string): string {
         result.push(line);
         i++;
       }
+    } else if (
+      // Detect start of a bare non-K8s YAML block: a key: value line at
+      // column 0 that isn't apiVersion but looks like YAML, followed by
+      // enough YAML-like lines to be confident it's structured YAML and
+      // not prose.  This catches Helm values.yaml, Ansible playbooks, etc.
+      !inCodeFence &&
+      !insideHeredoc &&
+      trimmed !== '' &&
+      !/^\s+/.test(line) &&
+      /^[\w][\w.\/-]*:\s?/.test(trimmed) &&
+      !looksLikeShellOrDockerCodeLine(trimmed) &&
+      // Reject prose sentences that happen to start with "Word: ..." — real YAML
+      // values are short (key: value), not long English sentences.  Count the
+      // words after the colon; if there are many, it's prose, not YAML.
+      (trimmed.match(/:\s+(.*)/)?.[1]?.split(/\s+/).length ?? 0) < PROSE_WORD_THRESHOLD
+    ) {
+      // Peek ahead to count consecutive YAML-like lines
+      let peek = i;
+      let yamlLineCount = 0;
+      while (peek < lines.length) {
+        const pt = lines[peek].trim();
+        if (pt === '') {
+          // Allow single blank lines
+          let nextNonBlank = peek + 1;
+          while (nextNonBlank < lines.length && lines[nextNonBlank].trim() === '') nextNonBlank++;
+          if (nextNonBlank - peek >= 2) break; // 2+ blanks = end
+          if (nextNonBlank < lines.length && looksLikeYaml(lines[nextNonBlank].trim())) {
+            peek++;
+            continue;
+          }
+          break;
+        }
+        if (!looksLikeYaml(pt)) break;
+        // Reject prose sentences that start with "Word: long sentence" — the
+        // PROSE_WORD_THRESHOLD check on the initial line must also apply to
+        // continuation lines within the peek loop.
+        if (
+          /^[\w][\w.\/-]*:\s+/.test(pt) &&
+          (pt.match(/:\s+(.*)/)?.[1]?.split(/\s+/).length ?? 0) >= PROSE_WORD_THRESHOLD
+        )
+          break;
+        yamlLineCount++;
+        peek++;
+      }
+      // Require 3+ YAML-like lines to wrap as yaml (avoid false positives
+      // on single key: value lines that are prose descriptions).
+      const MIN_YAML_LINES = 3;
+      if (yamlLineCount >= MIN_YAML_LINES) {
+        const yamlLines: string[] = [];
+        let j = i;
+        while (j < peek) {
+          yamlLines.push(lines[j]);
+          j++;
+        }
+        // Trim trailing blank lines
+        while (yamlLines.length > 0 && yamlLines[yamlLines.length - 1].trim() === '') {
+          yamlLines.pop();
+        }
+        if (yamlLines.length > 0) {
+          result.push('```yaml');
+          result.push(...yamlLines);
+          result.push('```');
+          wrappedBlockCount++;
+          i = j;
+        } else {
+          result.push(line);
+          i++;
+        }
+      } else {
+        result.push(line);
+        i++;
+      }
+    } else if (
+      // Detect start of a bare YAML list block: "- key: value" or "- item"
+      // at column 0 outside a code fence, followed by enough YAML-like
+      // lines to be confident it's structured YAML and not prose.
+      !inCodeFence &&
+      trimmed !== '' &&
+      !/^\s+/.test(line) &&
+      /^-\s+/.test(trimmed) &&
+      !looksLikeShellOrDockerCodeLine(trimmed)
+    ) {
+      // Peek ahead to count consecutive YAML-like lines
+      let peek = i;
+      let yamlLineCount = 0;
+      while (peek < lines.length) {
+        const pt = lines[peek].trim();
+        if (pt === '') {
+          let nextNonBlank = peek + 1;
+          while (nextNonBlank < lines.length && lines[nextNonBlank].trim() === '') nextNonBlank++;
+          if (nextNonBlank - peek >= 2) break;
+          if (nextNonBlank < lines.length && looksLikeYaml(lines[nextNonBlank].trim())) {
+            peek++;
+            continue;
+          }
+          break;
+        }
+        if (!looksLikeYaml(pt)) break;
+        yamlLineCount++;
+        peek++;
+      }
+      const MIN_YAML_LINES = 3;
+      if (yamlLineCount >= MIN_YAML_LINES) {
+        const yamlLines: string[] = [];
+        let j = i;
+        while (j < peek) {
+          yamlLines.push(lines[j]);
+          j++;
+        }
+        while (yamlLines.length > 0 && yamlLines[yamlLines.length - 1].trim() === '') {
+          yamlLines.pop();
+        }
+        // Distinguish YAML lists from prose bullet lists:
+        // For list items (lines starting with "- "), check if the content
+        // after "- " contains YAML structure (key: value, nested YAML).
+        // Prose bullets like "- Out of memory (OOMKilled)" or
+        // "- **Node status**: all 6 nodes" should not be wrapped as YAML.
+        let structuredYamlItems = 0;
+        let totalListItems = 0;
+        for (const yl of yamlLines) {
+          const yt = yl.trim();
+          if (/^-\s+/.test(yt)) {
+            totalListItems++;
+            const afterDash = yt.replace(/^-\s+/, '');
+            // Check if content after "- " has YAML key-value structure
+            // e.g., "name: nginx", "containerPort: 80", "key: MY_VAR"
+            // but NOT "Out of memory (OOMKilled)" or "**Node status**: all 6"
+            if (
+              /^[\w][\w.\/-]*:\s/.test(afterDash) || // key: value
+              /^-\s/.test(afterDash) || // nested list
+              /^[{\[]/.test(afterDash) // flow mapping/sequence
+            ) {
+              structuredYamlItems++;
+            }
+          }
+        }
+        // If most list items are prose (no YAML key-value structure),
+        // treat as markdown bullets, not YAML.
+        // Threshold: fewer than half the items have YAML structure.
+        const YAML_LIST_STRUCTURE_RATIO = 0.5;
+        const isProseBulletList =
+          totalListItems > 0 && structuredYamlItems < totalListItems * YAML_LIST_STRUCTURE_RATIO;
+        if (yamlLines.length > 0 && !isProseBulletList) {
+          result.push('```yaml');
+          result.push(...yamlLines);
+          result.push('```');
+          wrappedBlockCount++;
+          i = j;
+        } else {
+          result.push(line);
+          i++;
+        }
+      } else {
+        result.push(line);
+        i++;
+      }
+    } else if (
+      // Detect start of a bare JSON block: [ or { at column 0 outside a code
+      // fence, followed by enough JSON-like lines (matching looksLikeYaml) to
+      // be confident it's structured data.
+      !inCodeFence &&
+      !insideHeredoc &&
+      !/^\s+/.test(line) &&
+      /^[{\[]/.test(trimmed)
+    ) {
+      let peek = i;
+      let jsonLineCount = 0;
+      let braceDepth = 0;
+      while (peek < lines.length) {
+        const pt = lines[peek].trim();
+        if (pt === '') break;
+        // Track brace/bracket depth
+        for (const ch of pt) {
+          if (ch === '{' || ch === '[') braceDepth++;
+          if (ch === '}' || ch === ']') braceDepth--;
+        }
+        jsonLineCount++;
+        peek++;
+        // Stop when all braces/brackets are closed
+        if (braceDepth <= 0) break;
+      }
+      if (jsonLineCount >= 3) {
+        const jsonLines: string[] = [];
+        let j = i;
+        while (j < peek) {
+          jsonLines.push(lines[j]);
+          j++;
+        }
+        while (jsonLines.length > 0 && jsonLines[jsonLines.length - 1].trim() === '') {
+          jsonLines.pop();
+        }
+        if (jsonLines.length > 0) {
+          result.push('```json');
+          result.push(...jsonLines);
+          result.push('```');
+          wrappedBlockCount++;
+          i = j;
+        } else {
+          result.push(line);
+          i++;
+        }
+      } else {
+        result.push(line);
+        i++;
+      }
     } else {
       result.push(line);
       i++;
@@ -1863,6 +3391,52 @@ function wrapBareYamlBlocks(text: string): string {
   }
 
   return result.join('\n');
+}
+
+/**
+ * Check if any line in the collected code block contains patterns from a
+ * structured language (Python, Rust, Go, etc.) that uses indentation for
+ * function/class/block bodies.  Used by wrapBareCodeBlocks to decide
+ * whether to keep collecting indented continuation lines.
+ */
+function hasStructuredCodeContext(codeLines: string[]): boolean {
+  return codeLines.some(l => {
+    const t = l.trim();
+    return (
+      // Python
+      /^(from|import|def|class|async\s+def)\s/.test(t) ||
+      /^@\w/.test(t) ||
+      /__\w+__/.test(t) ||
+      // Rust
+      /^(pub(\s*\(\s*crate\s*\))?\s+)?(async\s+)?fn\s/.test(t) ||
+      /^(pub(\s*\(\s*crate\s*\))?\s+)?use\s/.test(t) ||
+      /^let\s/.test(t) ||
+      /^(pub(\s*\(\s*crate\s*\))?\s+)?(struct|enum|impl|trait|mod)\s/.test(t) ||
+      /^#\[/.test(t) ||
+      /^match\s+\S/.test(t) ||
+      // Go
+      /^(func|package)\s/.test(t) ||
+      /^(var|type)\s+\w+\s+\w+/.test(t) ||
+      /\w+\s*:=\s*\S/.test(t) ||
+      /^(if|for|switch|select)\s+.+\{/.test(t) ||
+      // C/C++
+      /^#\s*(include|define|ifdef|ifndef)\b/.test(t) ||
+      /^(int|void|char|float|double|long|unsigned|signed|static|extern|const)\s/.test(t) ||
+      // TypeScript/JavaScript
+      /^(interface|class|const|let|var|function|export|async)\s/.test(t) ||
+      // Terraform HCL
+      /^(resource|data|variable|output|provider|module|locals)\s/.test(t) ||
+      // Shell case/esac
+      /^case\s+.+\s+in/.test(t) ||
+      /^esac\s*$/.test(t) ||
+      // Shell if/elif...then
+      /^(if|elif)\s+.+;\s*then/.test(t) ||
+      // Java/Kotlin/Scala
+      /^(public|private|protected|abstract|static|final|suspend)\s/.test(t) ||
+      /^(case\s+)?class\s+[A-Z]/.test(t) ||
+      /^object\s+[A-Z]/.test(t)
+    );
+  });
 }
 
 /**
@@ -1904,21 +3478,155 @@ function wrapBareCodeBlocks(text: string): string {
       continue;
     }
 
+    // ── Filename-hint block detection ──────────────────────────────────────
+    // When a bare filename heading (e.g. "main.py", "requirements.txt",
+    // "Dockerfile", "Cargo.toml:") appears alone on a line, peek ahead: if
+    // the next non-blank lines look like code, collect them all as a single
+    // fenced block.  This uses the filename as a hint — the parser is more
+    // permissive about what counts as code when it knows the language from
+    // the extension (e.g. .py ⇒ Python, .txt ⇒ requirements-style deps).
+    // Also accepts filenames with a trailing colon (e.g. "Cargo.toml:").
+    const fileHintName = trimmed.replace(/:$/, '');
+    if (trimmed !== '' && !/^\s+/.test(line) && !inCodeFence && isBoldFileHeading(fileHintName)) {
+      // Peek ahead: skip blank lines, then check if content follows
+      let peekJ = i + 1;
+      while (peekJ < lines.length && lines[peekJ].trim() === '') peekJ++;
+      if (peekJ < lines.length) {
+        const firstContentTrimmed = lines[peekJ].trim();
+        // If the content is already fenced by a prior pipeline stage
+        // (normalizeTerminalMarkdown), skip — don't double-wrap.
+        if (/^```/.test(firstContentTrimmed)) {
+          result.push(line);
+          i++;
+          continue;
+        }
+        const firstContentIsCode =
+          looksLikeShellOrDockerCodeLine(firstContentTrimmed) ||
+          /^\s+\S/.test(lines[peekJ]) || // indented content after filename
+          /^\[[\w.-]+\]/.test(firstContentTrimmed); // TOML section [package]
+        // After a filename heading, even lines that don't individually look
+        // like code are likely file content.  Only skip when the first line
+        // is clearly prose (many words, no code chars).
+        const firstLineWords = firstContentTrimmed.split(/\s+/).length;
+        const firstIsProse =
+          firstLineWords >= PROSE_WORD_THRESHOLD &&
+          !looksLikeShellOrDockerCodeLine(firstContentTrimmed) &&
+          !CODE_LIKE_CHARS_RE.test(firstContentTrimmed);
+        if ((firstContentIsCode || !firstIsProse) && firstContentTrimmed !== '') {
+          // Emit the filename heading as prose
+          result.push(line);
+          i++;
+          // Emit blank lines between heading and code
+          while (i < lines.length && lines[i].trim() === '') {
+            result.push(lines[i]);
+            i++;
+          }
+          // Collect code lines into a single block
+          const codeLines: string[] = [];
+          let fj = i;
+          while (fj < lines.length) {
+            const fl = lines[fj];
+            const ft = fl.trim();
+            // Blank line: peek ahead — keep if followed by more code-like
+            // content, break if followed by a new file heading or prose
+            if (ft === '') {
+              let peekNext = fj + 1;
+              while (peekNext < lines.length && lines[peekNext].trim() === '') peekNext++;
+              const blankCount = peekNext - fj;
+              if (blankCount >= 2 || peekNext >= lines.length) break;
+              const nextTr = lines[peekNext].trim();
+              // Break at next file heading (with or without trailing colon)
+              if (isBoldFileHeading(nextTr) || isBoldFileHeading(nextTr.replace(/:$/, ''))) break;
+              if (isFileHeaderComment(nextTr)) break;
+              // Continue if next line looks like code or is indented
+              if (looksLikeShellOrDockerCodeLine(nextTr) || /^\s+\S/.test(lines[peekNext])) {
+                codeLines.push(fl);
+                fj++;
+                continue;
+              }
+              break;
+            }
+            // Stop at file-heading boundaries (with or without trailing colon)
+            if (isBoldFileHeading(ft) || isBoldFileHeading(ft.replace(/:$/, ''))) break;
+            // Stop at lines that are clearly prose (many words, no code chars)
+            const ftWords = ft.split(/\s+/).length;
+            if (
+              ftWords >= PROSE_WORD_THRESHOLD &&
+              !looksLikeShellOrDockerCodeLine(ft) &&
+              !looksLikeYaml(ft) &&
+              !CODE_LIKE_CHARS_RE.test(ft)
+            )
+              break;
+            // Include code lines and non-code lines that aren't clearly prose
+            // (short assignment lines like "app = FastAPI()" may not match
+            // looksLikeShellOrDockerCodeLine but belong to the code block)
+            codeLines.push(fl);
+            fj++;
+          }
+          // Trim trailing blanks
+          while (codeLines.length > 0 && codeLines[codeLines.length - 1].trim() === '')
+            codeLines.pop();
+          if (codeLines.length > 0) {
+            result.push('```');
+            result.push(...codeLines);
+            result.push('```');
+            wrappedBlockCount++;
+            i = fj;
+            continue;
+          }
+          continue;
+        }
+      }
+    }
+
     // Detect start of a bare code block: non-blank, non-indented, looks like code
     // Exclude lines that start with # (could be markdown headings) unless they
     // match a Dockerfile directive or shell comment with URL/path
+    //
+    // Also detect Makefile directives/targets at column 0: .PHONY lines, bare
+    // targets, and targets with dependencies. These can be followed by another
+    // Makefile line or by a tab-indented recipe.
+    const isMakefileTarget = startsMakefileBlock(lines, i);
     if (
       trimmed !== '' &&
       !/^\s+/.test(line) &&
-      looksLikeShellOrDockerCodeLine(trimmed) &&
-      !looksLikeYaml(trimmed)
+      (isMakefileTarget || (looksLikeShellOrDockerCodeLine(trimmed) && !looksLikeYaml(trimmed)))
     ) {
       const codeLines: string[] = [];
       let j = i;
 
+      const isShallowPanelCodeContinuation = (rawLine: string, rawTrimmed: string): boolean => {
+        const indent = rawLine.match(/^(\s*)/)?.[1].length ?? 0;
+        return (
+          indent > 0 &&
+          indent <= 2 &&
+          looksLikeShellOrDockerCodeLine(rawTrimmed) &&
+          !looksLikeYaml(rawTrimmed)
+        );
+      };
+
+      // Track heredoc delimiter: if the starting line contains <<WORD, collect
+      // everything (including YAML-looking content) until the delimiter is found.
+      const heredocMatch = trimmed.match(/<<-?\s*['"]?(\w+)['"]?\s*$/);
+      const heredocDelimiter = heredocMatch?.[1] ?? null;
+
+      // Track if block starts with a shell prompt ($ command).
+      // When present, subsequent lines are command output and should stay in
+      // the block even if they don't look like code (e.g. kubectl status lines,
+      // Docker build steps, Helm status output).
+      const startsWithPrompt = /^\$\s+\w/.test(trimmed);
+
       while (j < lines.length) {
         const cl = lines[j];
         const ct = cl.trim();
+
+        // Inside a heredoc: collect everything until the closing delimiter.
+        if (heredocDelimiter) {
+          codeLines.push(cl);
+          j++;
+          if (ct === heredocDelimiter) break; // closing delimiter found
+          continue;
+        }
 
         // Allow single blank lines within a code block
         if (ct === '') {
@@ -1927,10 +3635,22 @@ function wrapBareCodeBlocks(text: string): string {
           while (peekIdx < lines.length && lines[peekIdx].trim() === '') peekIdx++;
           if (peekIdx < lines.length) {
             const peekTrimmed = lines[peekIdx].trim();
+            const peekIsIndented = /^\s+/.test(lines[peekIdx]);
+            // Break at file-type boundaries (e.g. "# Cargo.toml",
+            // "// src/main.rs") to avoid merging different file contents.
+            if (isFileHeaderComment(peekTrimmed)) {
+              break;
+            }
+            // In Python context, allow blank lines followed by indented
+            // continuation (function/class body) or by the next top-level
+            // Python statement.
+            const hasCodeCtx = hasStructuredCodeContext(codeLines);
             if (
               looksLikeShellOrDockerCodeLine(peekTrimmed) &&
               !looksLikeYaml(peekTrimmed) &&
-              !/^\s+/.test(lines[peekIdx])
+              (!peekIsIndented ||
+                hasCodeCtx ||
+                isShallowPanelCodeContinuation(lines[peekIdx], peekTrimmed))
             ) {
               codeLines.push(cl);
               j++;
@@ -1941,12 +3661,50 @@ function wrapBareCodeBlocks(text: string): string {
         }
 
         // Stop if line is indented (belongs to different formatting)
+        // UNLESS we are inside a Python code block — Python uses indentation
+        // for function/class bodies (e.g. the body of `def index():`)
+        // Also allow tab-indented Makefile recipe lines.
+        // Also allow indented continuation in shell prompt blocks (command output)
+        // and structured code context blocks.
         if (/^\s+/.test(cl)) {
+          if (
+            hasStructuredCodeContext(codeLines) ||
+            (isMakefileTarget && /^\t/.test(cl)) ||
+            isShallowPanelCodeContinuation(cl, ct) ||
+            startsWithPrompt
+          ) {
+            codeLines.push(cl);
+            j++;
+            continue;
+          }
           break;
         }
 
         // Stop if line doesn't look like code
+        // Exception: a lone closing brace `}` also matches looksLikeYaml
+        // (YAML flow mapping closer), but in structured code context
+        // (Rust/Go/C) it's a block closer and should stay in the code block.
+        // Exception: Makefile targets ("word:") in a Makefile block.
+        // Exception: in shell prompt blocks, YAML-looking output lines
+        // (like "NAME: value", "STATUS: deployed") stay in the block.
         if (!looksLikeShellOrDockerCodeLine(ct) || looksLikeYaml(ct)) {
+          if (/^\}\s*;?\s*$/.test(ct) && hasStructuredCodeContext(codeLines)) {
+            codeLines.push(cl);
+            j++;
+            continue;
+          }
+          if (isMakefileTarget && (isMakefileDirective(ct) || looksLikeMakefileTarget(ct))) {
+            codeLines.push(cl);
+            j++;
+            continue;
+          }
+          // Shell prompt blocks: keep YAML-looking command output lines
+          // (e.g. "NAME: my-release", "STATUS: deployed" from helm status)
+          if (startsWithPrompt && ct !== '' && !isBoldFileHeading(ct)) {
+            codeLines.push(cl);
+            j++;
+            continue;
+          }
           break;
         }
 
@@ -2050,6 +3808,31 @@ function cleanTerminalFormatting(text: string): string {
       'border lines, unwrapped',
       unwrappedPanels,
       'panel lines'
+    );
+  }
+
+  // Rejoin YAML keys split across lines by terminal wrapping.
+  // e.g. "          averageUtilization\n : 70" → "          averageUtilization: 70"
+  // This happens when a YAML key is too long for the 80-char terminal width
+  // and the colon + value wraps to the next line.
+  let rejoinedCount = 0;
+  for (let idx = 0; idx < result.length - 1; idx++) {
+    const cur = result[idx];
+    const next = result[idx + 1];
+    // Current line ends with a bare word (no colon) and is space-indented
+    // Next line starts with optional space + colon (for key-only YAML like "metadata:")
+    // or colon + space + value (e.g. ": 70" from "averageUtilization\n: 70")
+    if (/^\s+[\w.-]+$/.test(cur) && (/^\s*:\s*\S/.test(next) || /^\s*:$/.test(next))) {
+      result[idx] = cur + next.replace(/^\s*/, '');
+      result.splice(idx + 1, 1);
+      rejoinedCount++;
+    }
+  }
+  if (rejoinedCount > 0) {
+    verboseLog(
+      '[AKS Agent Parse] cleanTerminalFormatting: rejoined',
+      rejoinedCount,
+      'split YAML key-value lines'
     );
   }
 
@@ -3118,4 +4901,7 @@ export const _testing = {
   looksLikeShellOrDockerCodeLine,
   hasShellSyntax,
   normalizeTerminalMarkdown,
+  isFileHeaderComment,
+  isBoldFileHeading,
+  hasStructuredCodeContext,
 };

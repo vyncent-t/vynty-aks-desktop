@@ -4,7 +4,7 @@ The AKS desktop AI Assistant is a plugin that integrates AI capabilities directl
 
 The assistant is context-aware, meaning it uses information about your cluster to provide more relevant and accurate responses..
 
-**IMPORTANT:** This plugin is in alpha state and is disabled by default. You must enable the preview in Settings before using it.
+**IMPORTANT:** This plugin is in alpha state and is disabled by default. You must enable the preview in Settings before using it..
 
 This is based on the Headlamp AI assistant.
 
