@@ -1,4 +1,5 @@
 import { Icon } from '@iconify/react';
+import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { Box, Button, Paper, Typography } from '@mui/material';
 import React, { useState } from 'react';
 import LogsDialog from './LogsDialog';
@@ -19,19 +20,24 @@ const LogsButton: React.FC<LogsButtonProps> = ({
   containerName,
 }) => {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const { t } = useTranslation();
 
   const getTitle = () => {
-    const parts = [resourceType];
-    if (resourceName) {
-      parts.push(resourceName);
-    }
     if (containerName) {
-      parts.push(`(container: ${containerName})`);
-    } else if (namespace) {
-      parts.push(`(${namespace})`);
+      return t('{{resourceType}} {{resourceName}} (container: {{containerName}}) Logs', {
+        resourceType,
+        resourceName,
+        containerName,
+      });
     }
-    parts.push('Logs');
-    return parts.join(' ');
+    if (namespace) {
+      return t('{{resourceType}} {{resourceName}} ({{namespace}}) Logs', {
+        resourceType,
+        resourceName,
+        namespace,
+      });
+    }
+    return t('{{resourceType}} {{resourceName}} Logs', { resourceType, resourceName });
   };
 
   return (
@@ -60,7 +66,7 @@ const LogsButton: React.FC<LogsButtonProps> = ({
             onClick={() => setDialogOpen(true)}
             size="small"
           >
-            View in Editor
+            {t('View in Editor')}
           </Button>
         </Box>
       </Paper>

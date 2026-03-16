@@ -1,4 +1,5 @@
 import { Icon } from '@iconify/react';
+import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { Alert, Box, CircularProgress, Fab, Typography } from '@mui/material';
 import { useTheme } from '@mui/material';
 import { alpha } from '@mui/material/styles';
@@ -45,6 +46,7 @@ const TextStreamContainer = React.memo(function TextStreamContainer({
   const [resourceType, setResourceType] = useState('');
   const [isDelete, setIsDelete] = useState(false);
   const theme = useTheme();
+  const { t } = useTranslation();
   // Track if content filter errors were detected
   const [contentFilterErrors, setContentFilterErrors] = useState<boolean>(false);
   // Refs for controlling auto-scrolling
@@ -243,25 +245,28 @@ const TextStreamContainer = React.memo(function TextStreamContainer({
     });
   }, [history]);
 
-  const handleYamlDetected = useCallback((yaml: string, resourceType: string) => {
-    // Since we're removing the Delete button, we'll set isDelete to false always
-    setEditorContent(yaml);
-    setEditorTitle(`Apply ${resourceType}`);
-    setResourceType(resourceType);
-    setIsDelete(false); // Always false since we don't show delete button
-    setShowEditor(true);
-  }, []);
+  const handleYamlDetected = useCallback(
+    (yaml: string, resourceType: string) => {
+      // Since we're removing the Delete button, we'll set isDelete to false always
+      setEditorContent(yaml);
+      setEditorTitle(t('Apply {{resourceType}}', { resourceType }));
+      setResourceType(resourceType);
+      setIsDelete(false); // Always false since we don't show delete button
+      setShowEditor(true);
+    },
+    [t]
+  );
 
   // Memoize the onYamlDetected callback to prevent ContentRenderer from re-rendering
   const memoizedOnYamlDetected = useCallback(
     (yaml: string, resourceType: string) => {
       if (onYamlAction) {
-        onYamlAction(yaml, `Apply ${resourceType}`, resourceType, false);
+        onYamlAction(yaml, t('Apply {{resourceType}}', { resourceType }), resourceType, false);
       } else {
         handleYamlDetected(yaml, resourceType);
       }
     },
-    [onYamlAction, handleYamlDetected]
+    [onYamlAction, handleYamlDetected, t]
   );
 
   const renderMessage = useCallback(
@@ -311,7 +316,7 @@ const TextStreamContainer = React.memo(function TextStreamContainer({
           }}
         >
           <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>
-            {prompt.role === 'user' ? 'You' : 'AI Assistant'}
+            {prompt.role === 'user' ? t('You') : t('AI Assistant')}
           </Typography>
           <Box sx={{ whiteSpace: 'unset' }}>
             {prompt.role === 'user' ? (
@@ -323,7 +328,9 @@ const TextStreamContainer = React.memo(function TextStreamContainer({
                     {prompt.content}
                     {isContentFilterError && (
                       <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
-                        Tip: Focus your question specifically on Kubernetes administration tasks.
+                        {t(
+                          'Tip: Focus your question specifically on Kubernetes administration tasks.'
+                        )}
                       </Typography>
                     )}
                   </Alert>
@@ -342,7 +349,7 @@ const TextStreamContainer = React.memo(function TextStreamContainer({
         </Box>
       );
     },
-    [history.length, theme.palette, memoizedOnYamlDetected]
+    [history.length, theme.palette, memoizedOnYamlDetected, t]
   );
 
   return (
@@ -362,8 +369,9 @@ const TextStreamContainer = React.memo(function TextStreamContainer({
         {contentFilterErrors && (
           <Alert severity="info" sx={{ mb: 2, overflowWrap: 'anywhere' }}>
             <Typography variant="body2">
-              Some requests have been blocked by content filters. Please ensure your questions focus
-              only on Kubernetes tasks.
+              {t(
+                'Some requests have been blocked by content filters. Please ensure your questions focus only on Kubernetes tasks.'
+              )}
             </Typography>
           </Alert>
         )}
@@ -376,7 +384,7 @@ const TextStreamContainer = React.memo(function TextStreamContainer({
           ) : (
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', my: 2 }}>
               <CircularProgress size={24} sx={{ mr: 1 }} />
-              <Typography>Processing your request...</Typography>
+              <Typography>{t('Processing your request...')}</Typography>
             </Box>
           ))}
 
@@ -395,7 +403,7 @@ const TextStreamContainer = React.memo(function TextStreamContainer({
             right: 16,
             zIndex: 2,
           }}
-          aria-label="scroll to bottom"
+          aria-label={t('scroll to bottom')}
         >
           <Icon icon="mdi:chevron-down" width="20px" />
         </Fab>

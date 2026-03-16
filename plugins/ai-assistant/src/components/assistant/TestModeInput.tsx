@@ -1,4 +1,5 @@
 import { Icon } from '@iconify/react';
+import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import {
   Box,
   Button,
@@ -29,11 +30,12 @@ const TestModeInput: React.FC<TestModeInputProps> = ({ onAddTestResponse, isTest
   const [testContent, setTestContent] = useState('');
   const [responseType, setResponseType] = useState<'assistant' | 'user'>('assistant');
   const [hasError, setHasError] = useState(false);
+  const { t } = useTranslation();
 
   // Sample test responses for quick testing
   const sampleResponses = [
     {
-      label: 'Simple Markdown Text',
+      label: t('Simple Markdown Text'),
       content: `Here's how you can create a simple deployment:
 
 ## Creating a Deployment
@@ -48,7 +50,7 @@ Let me know which approach you'd prefer!`,
       type: 'assistant' as const,
     },
     {
-      label: 'YAML Response with Code Block',
+      label: t('YAML Response with Code Block'),
       content: `Here's a sample deployment YAML:
 
 \`\`\`yaml
@@ -79,7 +81,7 @@ This creates a simple nginx deployment with 3 replicas.`,
       type: 'assistant' as const,
     },
     {
-      label: 'Multiple YAML Resources',
+      label: t('Multiple YAML Resources'),
       content: `I'll create both a deployment and service for you:
 
 ## 1. Deployment
@@ -129,7 +131,7 @@ Both resources are now ready to be applied to your cluster.`,
       type: 'assistant' as const,
     },
     {
-      label: 'Cluster Issue Summary',
+      label: t('Cluster Issue Summary'),
       content: `The \`test-trivy-trivy-operator-6f995dffb8-knb9h\` pod in the \`default\` namespace is in an unusual state in your \`ig-hl-cluster\` cluster. It may require your attention.
 
 Additionally, there are warnings related to this cluster:
@@ -146,7 +148,7 @@ Additionally, there are warnings related to this cluster:
       type: 'assistant' as const,
     },
     {
-      label: 'Headlamp Link',
+      label: t('Headlamp Link'),
       content: `You can view the resource details in Headlamp by clicking the link below:
 
 - [deployment-link](https://headlamp/resource-details?cluster=ig-hl-cluster&kind=Deployment&resource=nginx-deployment&ns=default)
@@ -160,7 +162,7 @@ Additionally, there are warnings related to this cluster:
       type: 'assistant' as const,
     },
     {
-      label: 'Resource Table Result',
+      label: t('Resource Table Result'),
       content: `Found 3 items across 2 namespaces:
 
 | NAME | NAMESPACE | STATUS | AGE |
@@ -173,13 +175,13 @@ All deployments are currently active in your cluster.`,
       type: 'assistant' as const,
     },
     {
-      label: 'Error Response',
+      label: t('Error Response'),
       content: `I'm sorry, but I cannot help with that request as it violates content policies.`,
       type: 'assistant' as const,
       hasError: true,
     },
     {
-      label: 'User Question',
+      label: t('User Question'),
       content: `How can I create a deployment with 3 replicas of nginx?`,
       type: 'user' as const,
     },
@@ -204,7 +206,7 @@ All deployments are currently active in your cluster.`,
   return (
     <Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-        <Tooltip title="Add Test Response">
+        <Tooltip title={t('Add Test Response')}>
           <IconButton
             onClick={() => setOpen(true)}
             color="primary"
@@ -215,7 +217,7 @@ All deployments are currently active in your cluster.`,
           </IconButton>
         </Tooltip>
         <Typography variant="caption" color="text.secondary">
-          Test Mode Active - Add custom responses
+          {t('Test Mode Active - Add custom responses')}
         </Typography>
       </Box>
 
@@ -235,18 +237,18 @@ All deployments are currently active in your cluster.`,
       </Box>
 
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Add Test Response</DialogTitle>
+        <DialogTitle>{t('Add Test Response')}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
             <FormControl fullWidth>
-              <InputLabel>Response Type</InputLabel>
+              <InputLabel>{t('Response Type')}</InputLabel>
               <Select
                 value={responseType}
-                label="Response Type"
+                label={t('Response Type')}
                 onChange={e => setResponseType(e.target.value as 'assistant' | 'user')}
               >
-                <MenuItem value="assistant">AI Assistant Response</MenuItem>
-                <MenuItem value="user">User Message</MenuItem>
+                <MenuItem value="assistant">{t('AI Assistant Response')}</MenuItem>
+                <MenuItem value="user">{t('User Message')}</MenuItem>
               </Select>
             </FormControl>
 
@@ -255,31 +257,34 @@ All deployments are currently active in your cluster.`,
                 control={
                   <Switch checked={hasError} onChange={e => setHasError(e.target.checked)} />
                 }
-                label="Simulate Error Response"
+                label={t('Simulate Error Response')}
               />
             )}
 
             <TextField
-              label="Response Content"
+              label={t('Response Content')}
               multiline
               rows={12}
               fullWidth
               value={testContent}
               onChange={e => setTestContent(e.target.value)}
-              placeholder="Enter your test response here. You can use markdown, YAML code blocks, etc."
+              placeholder={t(
+                'Enter your test response here. You can use markdown, YAML code blocks, etc.'
+              )}
               variant="outlined"
             />
 
             <Typography variant="caption" color="text.secondary">
-              Tip: Use ```yaml code blocks to test YAML rendering, or include markdown for
-              formatting tests.
+              {t(
+                'Tip: Use ```yaml code blocks to test YAML rendering, or include markdown for formatting tests.'
+              )}
             </Typography>
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={() => setOpen(false)}>{t('Cancel')}</Button>
           <Button onClick={handleSubmit} variant="contained" disabled={!testContent.trim()}>
-            Add Response
+            {t('Add Response')}
           </Button>
         </DialogActions>
       </Dialog>

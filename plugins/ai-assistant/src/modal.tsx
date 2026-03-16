@@ -1,4 +1,5 @@
 import { Icon } from '@iconify/react';
+import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { useClustersConf, useSelectedClusters } from '@kinvolk/headlamp-plugin/lib/k8s';
 import { getCluster, getClusterGroup } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { Box, Button, CircularProgress, Grid, Typography } from '@mui/material';
@@ -53,6 +54,7 @@ export default function AIPrompt(props: {
   const { openPopup, setOpenPopup, pluginSettings } = props;
   const history = useHistory();
   const location = useLocation();
+  const { t } = useTranslation();
   const rootRef = React.useRef(null);
   const [promptVal, setPromptVal] = React.useState('');
   const [loading, setLoading] = React.useState(false);
@@ -801,7 +803,7 @@ export default function AIPrompt(props: {
         >
           <CircularProgress size={24} />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            Checking for available AI agents...
+            {t('Checking for available AI agents...')}
           </Typography>
         </Box>
       );
@@ -822,11 +824,12 @@ export default function AIPrompt(props: {
           }}
         >
           <Typography variant="h6" gutterBottom>
-            AI Assistant Setup Required
+            {t('AI Assistant Setup Required')}
           </Typography>
           <Typography variant="body1" color="text.secondary" paragraph>
-            To use the AI Assistant, please configure your AI provider credentials in the settings
-            page.
+            {t(
+              'To use the AI Assistant, please configure your AI provider credentials in the settings page.'
+            )}
           </Typography>
           <Button
             variant="contained"
@@ -836,7 +839,7 @@ export default function AIPrompt(props: {
               setOpenPopup(false);
             }}
           >
-            Go to Settings
+            {t('Go to Settings')}
           </Button>
         </Box>
       );
@@ -893,9 +896,9 @@ export default function AIPrompt(props: {
                 }}
               >
                 <Icon icon="mdi:cog-outline" width="40px" style={{ opacity: 0.4 }} />
-                <Typography variant="h6">No AI Provider Configured</Typography>
+                <Typography variant="h6">{t('No AI Provider Configured')}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Chat mode requires an AI provider. Go to Settings to add one.
+                  {t('Chat mode requires an AI provider. Go to Settings to add one.')}
                 </Typography>
                 <Button
                   variant="contained"
@@ -905,7 +908,7 @@ export default function AIPrompt(props: {
                     setOpenPopup(false);
                   }}
                 >
-                  Go to Settings
+                  {t('Go to Settings')}
                 </Button>
               </Box>
             ) : (

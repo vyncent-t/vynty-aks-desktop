@@ -1,3 +1,4 @@
+import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { ConfirmDialog, EditorDialog } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Box, Typography } from '@mui/material';
 import React from 'react';
@@ -31,6 +32,8 @@ export default function ApiConfirmationDialog({
   body,
   onConfirm,
 }: ApiConfirmationDialogProps) {
+  const { t } = useTranslation();
+  const upperMethod = method.toUpperCase();
   const [editedBody, setEditedBody] = React.useState('');
   const [resourceInfo, setResourceInfo] = React.useState<{
     kind: string;
@@ -42,8 +45,28 @@ export default function ApiConfirmationDialog({
   const [openEditorDialog, setOpenEditorDialog] = React.useState(true);
   const [showUpdateConfirm, setShowUpdateConfirm] = React.useState(false);
 
+  // Reset internal state when dialog closes so each open cycle starts fresh
   React.useEffect(() => {
-    if (method.toUpperCase() === 'DELETE') {
+    if (!open) {
+      setShowDeleteConfirm(false);
+      setShowUpdateConfirm(false);
+      setOpenEditorDialog(true);
+      setEditedBody('');
+      setResourceInfo(null);
+    }
+  }, [open]);
+
+  // Auto-confirm GET requests without showing a dialog
+  React.useEffect(() => {
+    if (open && upperMethod === 'GET') {
+      onConfirm();
+      onClose();
+    }
+  }, [open, upperMethod, onConfirm, onClose]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    if (upperMethod === 'DELETE') {
       setShowDeleteConfirm(true);
     }
     if (body) {
@@ -88,9 +111,10 @@ export default function ApiConfirmationDialog({
       setEditedBody('');
       setResourceInfo(null);
     }
-  }, [body, method]);
+  }, [open, body, method]);
 
   React.useEffect(() => {
+    if (!open) return;
     if (!resourceInfo && url) {
       const urlParts = url.split('/');
       const nameIndex = urlParts.length - 1;
@@ -112,10 +136,10 @@ export default function ApiConfirmationDialog({
         }
       }
     }
-  }, [url, resourceInfo]);
+  }, [open, url, resourceInfo]);
 
   React.useEffect(() => {
-    if (open && method.toUpperCase() === 'PUT' && body && resourceInfo) {
+    if (open && upperMethod === 'PUT' && body && resourceInfo) {
       const processedBody = cleanYamlContent(body);
       try {
         const parsed = YAML.parse(processedBody);
@@ -148,20 +172,32 @@ export default function ApiConfirmationDialog({
     onClose();
   }
   const getTitle = () => {
-    const base =
-      method.toUpperCase() === 'DELETE'
-        ? 'Delete'
-        : method.toUpperCase() === 'POST'
-        ? 'Create'
-        : method.toUpperCase() === 'GET'
-        ? 'Fetch'
-        : 'Update';
-
     if (resourceInfo) {
-      return `${base} ${resourceInfo.kind}: ${resourceInfo.name}`;
+      if (upperMethod === 'DELETE')
+        return t('Delete {{kind}}: {{name}}', {
+          kind: resourceInfo.kind,
+          name: resourceInfo.name,
+        });
+      if (upperMethod === 'POST')
+        return t('Create {{kind}}: {{name}}', {
+          kind: resourceInfo.kind,
+          name: resourceInfo.name,
+        });
+      if (upperMethod === 'GET')
+        return t('Fetch {{kind}}: {{name}}', {
+          kind: resourceInfo.kind,
+          name: resourceInfo.name,
+        });
+      return t('Update {{kind}}: {{name}}', {
+        kind: resourceInfo.kind,
+        name: resourceInfo.name,
+      });
     }
 
-    return `${base} Resource`;
+    if (upperMethod === 'DELETE') return t('Delete Resource');
+    if (upperMethod === 'POST') return t('Create Resource');
+    if (upperMethod === 'GET') return t('Fetch Resource');
+    return t('Update Resource');
   };
 
   if (!url || !method) {
@@ -177,15 +213,27 @@ export default function ApiConfirmationDialog({
           onClose();
         }}
         onConfirm={handleDeleteConfirm}
-        title={`Delete ${resourceInfo?.kind || 'Resource'}`}
+        title={
+          resourceInfo ? t('Delete {{kind}}', { kind: resourceInfo.kind }) : t('Delete Resource')
+        }
         description={
           <Box>
             <Typography variant="body1" sx={{ mb: 2 }}>
               {resourceInfo
-                ? `Are you sure you want to delete the ${resourceInfo.kind} "${resourceInfo.name}"${
-                    resourceInfo.namespace ? ` in namespace "${resourceInfo.namespace}"` : ''
-                  }?`
-                : 'Are you sure you want to delete this resource?'}
+                ? resourceInfo.namespace
+                  ? t(
+                      'Are you sure you want to delete the {{kind}} "{{name}}" in namespace "{{namespace}}"?',
+                      {
+                        kind: resourceInfo.kind,
+                        name: resourceInfo.name,
+                        namespace: resourceInfo.namespace,
+                      }
+                    )
+                  : t('Are you sure you want to delete the {{kind}} "{{name}}"?', {
+                      kind: resourceInfo.kind,
+                      name: resourceInfo.name,
+                    })
+                : t('Are you sure you want to delete this resource?')}
             </Typography>
             {resourceInfo && (
               <Box
@@ -196,32 +244,36 @@ export default function ApiConfirmationDialog({
                 }}
               >
                 <Typography variant="subtitle2" component="div" sx={{ mb: 1 }}>
-                  Resource details:
+                  {t('Resource details:')}
                 </Typography>
                 <Typography variant="body2" component="div" sx={{ ml: 2 }}>
-                  <strong>Type:</strong> {resourceInfo.kind}
+                  <strong>{t('Type:')}</strong> {resourceInfo.kind}
                 </Typography>
                 <Typography variant="body2" component="div" sx={{ ml: 2 }}>
-                  <strong>Name:</strong> {resourceInfo.name}
+                  <strong>{t('Name:')}</strong> {resourceInfo.name}
                 </Typography>
                 {resourceInfo.namespace && (
                   <Typography variant="body2" component="div" sx={{ ml: 2 }}>
-                    <strong>Namespace:</strong> {resourceInfo.namespace}
+                    <strong>{t('Namespace:')}</strong> {resourceInfo.namespace}
                   </Typography>
                 )}
               </Box>
             )}
             <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-              This action cannot be undone.
+              {t('This action cannot be undone.')}
             </Typography>
           </Box>
         }
-        confirmLabel={`Yes, Delete ${resourceInfo?.kind || 'Resource'}`}
+        confirmLabel={
+          resourceInfo
+            ? t('Yes, Delete {{kind}}', { kind: resourceInfo.kind })
+            : t('Yes, Delete Resource')
+        }
       />
     );
   }
 
-  if (method.toUpperCase() === 'PUT' && showUpdateConfirm) {
+  if (upperMethod === 'PUT' && showUpdateConfirm) {
     return (
       <ConfirmDialog
         // @todo: open does exist on ConfirmDialog, but TS is not recognizing it.
@@ -232,31 +284,35 @@ export default function ApiConfirmationDialog({
           onClose();
         }}
         onConfirm={handleUpdateConfirm}
-        title={`Apply Patch to ${
-          resourceInfo ? `${resourceInfo.kind}: ${resourceInfo.name}` : 'Resource'
-        }`}
+        title={
+          resourceInfo
+            ? t('Apply Patch to {{kind}}: {{name}}', {
+                kind: resourceInfo.kind,
+                name: resourceInfo.name,
+              })
+            : t('Apply Patch to Resource')
+        }
         description={
           <Box>
             <Typography variant="body1" sx={{ mb: 2 }}>
-              The following patch will be applied to the resource:
+              {t('The following patch will be applied to the resource:')}
             </Typography>
             <Box sx={{ p: 2, border: '1px solid #ccc', borderRadius: 1 }}>
               <pre>{editedBody}</pre>
             </Box>
             <Typography variant="body2" sx={{ mt: 2 }}>
-              Are you sure you want to apply this patch? The system will merge this patch with the
-              current resource and update it.
+              {t(
+                'Are you sure you want to apply this patch? The system will merge this patch with the current resource and update it.'
+              )}
             </Typography>
           </Box>
         }
-        confirmLabel="Yes, Apply Patch"
+        confirmLabel={t('Yes, Apply Patch')}
       />
     );
   }
 
-  if (method.toUpperCase() === 'GET') {
-    onConfirm();
-    onClose();
+  if (upperMethod === 'GET') {
     return null;
   }
 
@@ -267,7 +323,7 @@ export default function ApiConfirmationDialog({
       open={openEditorDialog}
       onClose={() => setOpenEditorDialog(false)}
       setOpen={setOpenEditorDialog}
-      saveLabel="Apply"
+      saveLabel={t('Apply')}
       onSave={handleSave}
       title={getTitle()}
     />

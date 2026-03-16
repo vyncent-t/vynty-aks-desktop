@@ -1,4 +1,5 @@
 import { Icon } from '@iconify/react';
+import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { ConfirmDialog } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import {
   Box,
@@ -49,17 +50,18 @@ function ProviderSelectionDialog({
   onClose,
   onSelectProvider,
 }: ProviderSelectionDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md">
       <DialogTitle>
         <Box display="flex" alignItems="center" gap={1}>
           <Icon icon="mdi:plus-circle" width="24px" height="24px" />
-          <Typography variant="h6">Select Provider</Typography>
+          <Typography variant="h6">{t('Select Provider')}</Typography>
         </Box>
       </DialogTitle>
       <DialogContent>
         <Typography variant="body2" sx={{ mb: 3, color: 'text.secondary' }}>
-          Select a provider to add a new configuration
+          {t('Select a provider to add a new configuration')}
         </Typography>
         <Grid container spacing={2}>
           {modelProviders.map(provider => (
@@ -93,7 +95,7 @@ function ProviderSelectionDialog({
         </Grid>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose}>{t('Cancel')}</Button>
       </DialogActions>
     </Dialog>
   );
@@ -124,6 +126,7 @@ function ConfigurationDialog({
   const provider = getProviderById(providerId);
   const fields = getProviderFields(providerId);
   const [initialRender, setInitialRender] = useState(true);
+  const { t } = useTranslation();
 
   const handleFieldChange = (fieldName: string, value: any) => {
     // Update the config with the new field value
@@ -158,7 +161,9 @@ function ConfigurationDialog({
         <Box display="flex" alignItems="center" gap={1}>
           {provider && <Icon icon={provider.icon} width="24px" height="24px" />}
           <Typography variant="h6">
-            {provider ? `Configure ${provider.name}` : 'Configure Provider'}
+            {provider
+              ? t('Configure {{provider}}', { provider: provider.name })
+              : t('Configure Provider')}
           </Typography>
         </Box>
       </DialogTitle>
@@ -166,13 +171,13 @@ function ConfigurationDialog({
         {provider && (
           <Box sx={{ p: 1 }}>
             <Typography variant="body2" sx={{ mb: 3, color: 'text.secondary' }}>
-              {provider.description}
+              {t(provider.description)}
             </Typography>
 
             {onConfigNameChange && (
               <Box sx={{ mb: 3 }}>
                 <Typography variant="body2" sx={{ mb: 0.5 }}>
-                  Configuration Name
+                  {t('Configuration Name')}
                 </Typography>
                 <TextField
                   value={configName}
@@ -181,8 +186,8 @@ function ConfigurationDialog({
                   }}
                   size="small"
                   fullWidth
-                  placeholder="Give this configuration a name"
-                  helperText="A friendly name to identify this configuration"
+                  placeholder={t('Give this configuration a name')}
+                  helperText={t('A friendly name to identify this configuration')}
                 />
               </Box>
             )}
@@ -193,7 +198,7 @@ function ConfigurationDialog({
                   {field.type === 'select' && field.name === 'model' ? (
                     <Box sx={{ mb: 2 }}>
                       <Typography variant="body2" sx={{ mb: 0.5 }}>
-                        {field.label}
+                        {t(field.label)}
                         {field.required && (
                           <Box component="span" sx={{ color: 'error.main' }}>
                             {' '}
@@ -216,13 +221,17 @@ function ConfigurationDialog({
                             {...params}
                             fullWidth
                             size="small"
-                            placeholder="Enter or select model name (e.g., gpt-4, claude-3-opus, custom-model)"
+                            placeholder={t(
+                              'Enter or select model name (e.g., gpt-4, claude-3-opus, custom-model)'
+                            )}
                             helperText={
                               config[field.name]
                                 ? field.options?.includes(config[field.name])
-                                  ? `Using model: ${config[field.name]}`
-                                  : `Using custom model: ${config[field.name]}`
-                                : 'Enter a model name or select from the dropdown'
+                                  ? t('Using model: {{model}}', { model: config[field.name] })
+                                  : t('Using custom model: {{model}}', {
+                                      model: config[field.name],
+                                    })
+                                : t('Enter a model name or select from the dropdown')
                             }
                             InputProps={{
                               ...params.InputProps,
@@ -231,7 +240,7 @@ function ConfigurationDialog({
                                 !field.options?.includes(config[field.name]) ? (
                                   <Box sx={{ mr: 1 }}>
                                     <Chip
-                                      label="Custom"
+                                      label={t('Custom')}
                                       size="small"
                                       color="primary"
                                       variant="outlined"
@@ -246,7 +255,7 @@ function ConfigurationDialog({
                                     const defaultModel = field.default || field.options?.[0] || '';
                                     handleFieldChange(field.name, defaultModel);
                                   }}
-                                  title="Reset to default model"
+                                  title={t('Reset to default model')}
                                 >
                                   <Icon icon="mdi:restore" width="16px" />
                                 </IconButton>
@@ -255,12 +264,12 @@ function ConfigurationDialog({
                           />
                         )}
                       />
-                      {field.description && <FormHelperText>{field.description}</FormHelperText>}
+                      {field.description && <FormHelperText>{t(field.description)}</FormHelperText>}
                     </Box>
                   ) : field.type === 'select' ? (
                     <Box sx={{ mb: 2 }}>
                       <Typography variant="body2" sx={{ mb: 0.5 }}>
-                        {field.label}
+                        {t(field.label)}
                         {field.required && (
                           <Box component="span" sx={{ color: 'error.main' }}>
                             {' '}
@@ -276,7 +285,7 @@ function ConfigurationDialog({
                         displayEmpty
                       >
                         <MenuItem value="" disabled>
-                          <em>Select {field.label}</em>
+                          <em>{t('Select {{field}}', { field: t(field.label) })}</em>
                         </MenuItem>
                         {field.options?.map(option => (
                           <MenuItem key={option} value={option}>
@@ -284,12 +293,12 @@ function ConfigurationDialog({
                           </MenuItem>
                         ))}
                       </Select>
-                      {field.description && <FormHelperText>{field.description}</FormHelperText>}
+                      {field.description && <FormHelperText>{t(field.description)}</FormHelperText>}
                     </Box>
                   ) : field.type === 'number' ? (
                     <Box sx={{ mb: 2 }}>
                       <Typography variant="body2" sx={{ mb: 0.5 }}>
-                        {field.label}
+                        {t(field.label)}
                         {field.required && (
                           <Box component="span" sx={{ color: 'error.main' }}>
                             {' '}
@@ -303,15 +312,15 @@ function ConfigurationDialog({
                         onChange={e => handleFieldChange(field.name, e.target.value)}
                         fullWidth
                         size="small"
-                        placeholder={field.placeholder}
+                        placeholder={field.placeholder ? t(field.placeholder) : undefined}
                         inputProps={{ step: 0.1 }}
                       />
-                      {field.description && <FormHelperText>{field.description}</FormHelperText>}
+                      {field.description && <FormHelperText>{t(field.description)}</FormHelperText>}
                     </Box>
                   ) : (
                     <Box sx={{ mb: 2 }}>
                       <Typography variant="body2" sx={{ mb: 0.5 }}>
-                        {field.label}
+                        {t(field.label)}
                         {field.required && (
                           <Box component="span" sx={{ color: 'error.main' }}>
                             {' '}
@@ -325,9 +334,9 @@ function ConfigurationDialog({
                         onChange={e => handleFieldChange(field.name, e.target.value)}
                         fullWidth
                         size="small"
-                        placeholder={field.placeholder}
+                        placeholder={field.placeholder ? t(field.placeholder) : undefined}
                       />
-                      {field.description && <FormHelperText>{field.description}</FormHelperText>}
+                      {field.description && <FormHelperText>{t(field.description)}</FormHelperText>}
                     </Box>
                   )}
                 </Grid>
@@ -359,11 +368,12 @@ function ConfigurationDialog({
                       label={
                         <Box>
                           <Typography variant="body2">
-                            Show only this model in chat window
+                            {t('Show only this model in chat window')}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
-                            When enabled, only this specific model will appear in the chat selector,
-                            hiding other models from this provider.
+                            {t(
+                              'When enabled, only this specific model will appear in the chat selector, hiding other models from this provider.'
+                            )}
                           </Typography>
                         </Box>
                       }
@@ -379,10 +389,10 @@ function ConfigurationDialog({
       <DialogActions sx={{ p: 2 }}>
         <Box sx={{ flex: 1 }}>
           <Typography variant="body2" color={isValid ? 'success.main' : 'error.main'}>
-            {isValid ? 'Configuration is valid.' : 'Please fill in all required fields.'}
+            {isValid ? t('Configuration is valid.') : t('Please fill in all required fields.')}
           </Typography>
         </Box>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose}>{t('Cancel')}</Button>
         {onSave && (
           <Button
             variant="contained"
@@ -390,7 +400,7 @@ function ConfigurationDialog({
             onClick={() => onSave(true)}
             disabled={!isValid}
           >
-            Save
+            {t('Save')}
           </Button>
         )}
       </DialogActions>
@@ -427,6 +437,7 @@ export default function ModelSelector({
   const [dialogConfig, setDialogConfig] = useState<Record<string, any>>({});
   const [dialogConfigName, setDialogConfigName] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const { t } = useTranslation();
 
   // New state for provider selection dialog
   const [providerSelectionOpen, setProviderSelectionOpen] = useState(false);
@@ -775,7 +786,9 @@ export default function ModelSelector({
       <Box sx={{ mb: 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="subtitle1">
-            {!savedConfigs?.providers?.length ? 'No Configured Providers' : 'Configured Providers'}
+            {!savedConfigs?.providers?.length
+              ? t('No Configured Providers')
+              : t('Configured Providers')}
           </Typography>
           <Button
             variant="contained"
@@ -783,7 +796,7 @@ export default function ModelSelector({
             startIcon={<Icon icon="mdi:plus-circle" />}
             onClick={handleAddProviderClick}
           >
-            Add Provider
+            {t('Add Provider')}
           </Button>
         </Box>
 
@@ -804,10 +817,10 @@ export default function ModelSelector({
           >
             <Icon icon="mdi:robot-confused" width="48px" height="48px" style={{ opacity: 0.6 }} />
             <Typography variant="body1" sx={{ mt: 2, mb: 1 }}>
-              No AI providers configured yet
+              {t('No AI providers configured yet')}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Click "Add Provider" to configure your first AI provider
+              {t('Click "Add Provider" to configure your first AI provider')}
             </Typography>
           </Paper>
         ) : (
@@ -856,7 +869,7 @@ export default function ModelSelector({
                       <Box>
                         {savedConfigs && index === (savedConfigs.defaultProviderIndex ?? 0) && (
                           <Chip
-                            label="Default"
+                            label={t('Default')}
                             size="small"
                             color="primary"
                             sx={{ fontSize: '0.7rem' }}
@@ -893,12 +906,13 @@ export default function ModelSelector({
                               component="span"
                               sx={{ color: 'primary.main', fontWeight: 'medium' }}
                             >
-                              {' • Only this model'}
+                              {' • '}
+                              {t('Only this model')}
                             </Box>
                           )}
                         </Box>
                       ) : (
-                        'Configuration'
+                        t('Configuration')
                       )}
                     </Typography>
 
@@ -929,7 +943,7 @@ export default function ModelSelector({
                         }}
                       >
                         <Icon icon="mdi:pencil" width="16px" style={{ marginRight: 8 }} />
-                        Edit
+                        {t('Edit')}
                       </MenuItem>
                       <MenuItem
                         onClick={e => {
@@ -954,7 +968,7 @@ export default function ModelSelector({
                         }}
                       >
                         <Icon icon="mdi:star" width="16px" style={{ marginRight: 8 }} />
-                        Make Default
+                        {t('Make Default')}
                       </MenuItem>
                       <MenuItem
                         onClick={e => {
@@ -971,7 +985,7 @@ export default function ModelSelector({
                         sx={{ color: 'error.main' }}
                       >
                         <Icon icon="mdi:trash-can" width="16px" style={{ marginRight: 8 }} />
-                        Delete
+                        {t('Delete')}
                       </MenuItem>
                     </Menu>
                   </Paper>
@@ -1017,10 +1031,10 @@ export default function ModelSelector({
             handleDeleteConfig(selectedSavedConfig.providerId, selectedSavedConfig.config);
           }
         }}
-        title="Delete Configuration"
-        description="Are you sure you want to delete this configuration?"
-        cancelLabel="Cancel"
-        confirmLabel="Delete"
+        title={t('Delete Configuration')}
+        description={t('Are you sure you want to delete this configuration?')}
+        cancelLabel={t('Cancel')}
+        confirmLabel={t('Delete')}
       />
     </Box>
   );
