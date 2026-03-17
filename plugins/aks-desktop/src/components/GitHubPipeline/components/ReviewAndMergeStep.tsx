@@ -2,19 +2,16 @@
 // Licensed under the Apache 2.0.
 
 import { Icon } from '@iconify/react';
+import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { Alert, Box, Button, Chip, CircularProgress, Typography } from '@mui/material';
 import React from 'react';
 import type { AgentPhase } from '../hooks/useAgentWorkflowProgress';
+import type { UsePRPollingResult } from '../hooks/usePRPolling';
 import type { PipelineDeploymentState, PipelineState } from '../types';
 import { getCheckColor, getCheckIcon } from '../utils/statusDisplay';
-import type { StepStatus } from './StepStatusIcon';
 import { StepStatusIcon } from './StepStatusIcon';
 
-interface PrPolling {
-  prStatus: { state: string; merged: boolean; mergeable: boolean | null } | null;
-  isTimedOut: boolean;
-  statusChecks: Array<{ name: string; status: string; conclusion: string | null }> | null;
-}
+type PrPolling = Pick<UsePRPollingResult, 'prStatus' | 'isTimedOut' | 'statusChecks'>;
 
 interface ReviewAndMergeStepProps {
   deploymentState: PipelineDeploymentState;
@@ -72,6 +69,7 @@ function getSubPhaseStatus(
 }
 
 function useElapsedTime(startedAt: string | null): string | null {
+  const { t } = useTranslation();
   const [elapsed, setElapsed] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -81,27 +79,27 @@ function useElapsedTime(startedAt: string | null): string | null {
     }
     const parsed = new Date(startedAt).getTime();
     if (isNaN(parsed)) {
-      setElapsed('');
+      setElapsed(null);
       return;
     }
     const update = () => {
       const seconds = Math.floor((Date.now() - parsed) / 1000);
       if (seconds < 60) {
-        setElapsed('less than a minute');
+        setElapsed(t('less than a minute'));
       } else {
         const minutes = Math.floor(seconds / 60);
-        setElapsed(`${minutes} min`);
+        setElapsed(t('{{count}} min', { count: minutes }));
       }
     };
     update();
     const id = setInterval(update, 30_000);
     return () => clearInterval(id);
-  }, [startedAt]);
+  }, [startedAt, t]);
 
   return elapsed;
 }
 
-function CompletedSummary({ items }: { items: string[] }) {
+function CompletedSummary({ items }: { items: { id: string; label: string }[] }) {
   return (
     <Box
       sx={{
@@ -113,9 +111,9 @@ function CompletedSummary({ items }: { items: string[] }) {
       }}
     >
       {items.map(item => (
-        <Box key={item} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+        <Box key={item.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
           <StepStatusIcon status="done" size={18} />
-          <Typography variant="body2">{item}</Typography>
+          <Typography variant="body2">{item.label}</Typography>
         </Box>
       ))}
     </Box>
@@ -123,6 +121,7 @@ function CompletedSummary({ items }: { items: string[] }) {
 }
 
 function UpcomingSection({ title, description }: { title: string; description: string }) {
+  const { t } = useTranslation();
   return (
     <Box
       sx={{
@@ -132,7 +131,7 @@ function UpcomingSection({ title, description }: { title: string; description: s
         mt: 2,
       }}
     >
-      <Chip label="Up next" size="small" sx={{ mb: 1, fontSize: '0.7rem' }} />
+      <Chip label={t('Up next')} size="small" sx={{ mb: 1, fontSize: '0.7rem' }} />
       <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.disabled' }}>
         {title}
       </Typography>
@@ -158,6 +157,7 @@ function PRStatusCard({
   prPolling: PrPolling;
   onReviewInGitHub: () => void;
 }) {
+  const { t } = useTranslation();
   const merged = prPolling.prStatus?.merged ?? false;
   const isClosed = prPolling.prStatus?.state === 'closed' && !merged;
 
@@ -191,7 +191,7 @@ function PRStatusCard({
           }}
         >
           <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            PR {prNumber}
+            {t('PR {{number}}', { number: prNumber })}
           </Typography>
           {prPolling.statusChecks &&
             prPolling.statusChecks.length > 0 &&
@@ -213,7 +213,7 @@ function PRStatusCard({
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
               <CircularProgress size={16} sx={{ mr: 1 }} />
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Checking merge status...
+                {t('Checking merge status...')}
               </Typography>
             </Box>
           )}
@@ -222,13 +222,13 @@ function PRStatusCard({
 
       {prPolling.isTimedOut && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          This is taking longer than expected. Check the PR on GitHub for the latest status.
+          {t('This is taking longer than expected. Check the PR on GitHub for the latest status.')}
         </Alert>
       )}
 
       {isClosed && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          This PR was closed without merging. You may need to restart the process.
+          {t('This PR was closed without merging. You may need to restart the process.')}
         </Alert>
       )}
 
@@ -237,10 +237,10 @@ function PRStatusCard({
           variant="outlined"
           size="small"
           onClick={onReviewInGitHub}
-          startIcon={<Icon icon="mdi:open-in-new" />}
+          startIcon={<Icon icon="mdi:open-in-new" aria-hidden="true" />}
           sx={{ textTransform: 'none' }}
         >
-          Review on GitHub
+          {t('Review on GitHub')}
         </Button>
       )}
     </Box>
@@ -256,6 +256,7 @@ function ActiveAgentWorking({
   agentProgress: ReviewAndMergeStepProps['agentWorkflowProgress'];
   onReviewInGitHub: () => void;
 }) {
+  const { t } = useTranslation();
   const issueNumber = pipelineState.triggerIssue.number;
   const issueUrl = pipelineState.triggerIssue.url;
   const hasPhases = agentProgress && agentProgress.phases.length > 0;
@@ -274,12 +275,13 @@ function ActiveAgentWorking({
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
         <Box component={Icon} icon="mdi:robot-outline" sx={{ fontSize: 24, color: 'info.main' }} />
         <Typography variant="h6" sx={{ fontWeight: 600 }}>
-          Agent is working
+          {t('Agent is working')}
         </Typography>
       </Box>
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-        The Copilot coding agent is analyzing your repo and generating a deployment PR with
-        Dockerfile, Kubernetes manifests and a GitHub Actions workflow.
+        {t(
+          'The Copilot coding agent is analyzing your repo and generating a deployment PR with Dockerfile, Kubernetes manifests and a GitHub Actions workflow.'
+        )}
       </Typography>
 
       {issueNumber !== null && (
@@ -292,12 +294,12 @@ function ActiveAgentWorking({
           }}
         >
           <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Issue {issueNumber}
+            {t('Issue {{number}}', { number: issueNumber })}
           </Typography>
           {hasPhases ? (
             (agentProgress?.phases ?? []).map(phase => (
               <Box key={phase.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                <StepStatusIcon status={phase.status as StepStatus} size={18} />
+                <StepStatusIcon status={phase.status} size={18} />
                 <Typography
                   variant="body2"
                   sx={{
@@ -322,13 +324,13 @@ function ActiveAgentWorking({
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
               <CircularProgress size={16} sx={{ mr: 1 }} />
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Waiting for agent workflow to start...
+                {t('Waiting for agent workflow to start...')}
               </Typography>
             </Box>
           )}
           {agentProgress?.agentStartedAt && (
             <Typography variant="caption" sx={{ color: 'text.secondary', mt: 1, display: 'block' }}>
-              This typically takes 10–25 minutes.
+              {t('This typically takes 10–25 minutes.')}
             </Typography>
           )}
         </Box>
@@ -339,10 +341,10 @@ function ActiveAgentWorking({
           variant="outlined"
           size="small"
           onClick={onReviewInGitHub}
-          startIcon={<Icon icon="mdi:open-in-new" />}
+          startIcon={<Icon icon="mdi:open-in-new" aria-hidden="true" />}
           sx={{ textTransform: 'none' }}
         >
-          Review on GitHub
+          {t('Review on GitHub')}
         </Button>
       )}
     </Box>
@@ -356,6 +358,7 @@ function PipelineComplete({
   repoFullName: string;
   onViewDeployment?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Box
       sx={{
@@ -371,30 +374,34 @@ function PipelineComplete({
         sx={{ fontSize: 40, color: 'success.main', mb: 1 }}
       />
       <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
-        Pipeline configured
+        {t('Pipeline configured')}
       </Typography>
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-        CI/CD pipeline for <strong>{repoFullName}</strong> is ready. Trigger deployments from the
-        Deploy tab.
+        {t(
+          'CI/CD pipeline for {{repoFullName}} is ready. Trigger deployments from the Deploy tab.',
+          {
+            repoFullName,
+          }
+        )}
       </Typography>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
         <Typography variant="body2">
           <Box component="span" sx={{ mr: 1 }}>
             →
           </Box>
-          Setup PR reviewed and merged
+          {t('Setup PR reviewed and merged')}
         </Typography>
         <Typography variant="body2">
           <Box component="span" sx={{ mr: 1 }}>
             →
           </Box>
-          Copilot agent reviewed your repo and generated deployment PR
+          {t('Copilot agent reviewed your repo and generated deployment PR')}
         </Typography>
         <Typography variant="body2">
           <Box component="span" sx={{ mr: 1 }}>
             →
           </Box>
-          Deployment PR reviewed and merged
+          {t('Deployment PR reviewed and merged')}
         </Typography>
       </Box>
       {onViewDeployment && (
@@ -403,7 +410,7 @@ function PipelineComplete({
           onClick={onViewDeployment}
           sx={{ textTransform: 'none', mt: 3 }}
         >
-          View deployment
+          {t('View deployment')}
         </Button>
       )}
     </Box>
@@ -422,9 +429,10 @@ export function ReviewAndMergeStep({
   repoFullName,
   onViewDeployment,
 }: ReviewAndMergeStepProps) {
-  const setupMerged = setupPrPolling.prStatus?.merged ?? pipelineState.setupPr.merged ?? false;
+  const { t } = useTranslation();
+  const setupMerged = setupPrPolling.prStatus?.merged || pipelineState.setupPr.merged || false;
   const generatedMerged =
-    generatedPrPolling.prStatus?.merged ?? pipelineState.generatedPr.merged ?? false;
+    generatedPrPolling.prStatus?.merged || pipelineState.generatedPr.merged || false;
 
   const setupStatus = getSubPhaseStatus('setup-pr', deploymentState, setupMerged, generatedMerged);
   const agentStatus = getSubPhaseStatus(
@@ -441,22 +449,41 @@ export function ReviewAndMergeStep({
   );
 
   const isPipelineComplete =
-    deploymentState === 'PipelineConfigured' || deploymentState === 'Deployed';
+    deploymentState === 'PipelineConfigured' ||
+    deploymentState === 'Deployed' ||
+    deploymentState === 'PipelineRunning';
+
+  // Suppress the progress banner when a PR is closed without merging (flow can't proceed)
+  const isPrClosedWithoutMerge =
+    (setupStatus === 'active' &&
+      setupPrPolling.prStatus?.state === 'closed' &&
+      !setupPrPolling.prStatus?.merged) ||
+    (deployPRStatus === 'active' &&
+      generatedPrPolling.prStatus?.state === 'closed' &&
+      !generatedPrPolling.prStatus?.merged);
 
   // Show the "collapse to save progress" info banner when work is in progress
-  const showProgressBanner = !isPipelineComplete;
+  const showProgressBanner = !isPipelineComplete && !isPrClosedWithoutMerge;
 
   // Build completed items summary
-  const completedItems: string[] = [];
-  if (setupStatus === 'done') completedItems.push('Setup PR reviewed and merged');
+  const completedItems: { id: string; label: string }[] = [];
+  if (setupStatus === 'done')
+    completedItems.push({ id: 'setup-pr', label: t('Setup PR reviewed and merged') });
   if (agentStatus === 'done')
-    completedItems.push('Copilot agent reviewed your repo and generated deployment PR');
+    completedItems.push({
+      id: 'copilot-agent',
+      label: t('Copilot agent reviewed your repo and generated deployment PR'),
+    });
 
   return (
     <Box>
       {showProgressBanner && (
-        <Alert severity="info" sx={{ mb: 2 }} icon={<Icon icon="mdi:information" />}>
-          You can collapse this panel. Progress is saved and will resume when you return.
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          icon={<Icon icon="mdi:information" aria-hidden="true" />}
+        >
+          {t('You can collapse this panel. Progress is saved and will resume when you return.')}
         </Alert>
       )}
 
@@ -471,31 +498,55 @@ export function ReviewAndMergeStep({
       )}
 
       {/* Active section: Setup PR */}
-      {setupStatus === 'active' && (
-        <PRStatusCard
-          title="Setup PR Created"
-          description="Review and merge the setup PR to enable the Copilot agent."
-          prNumber={pipelineState.setupPr.number}
-          prUrl={pipelineState.setupPr.url}
-          prPolling={setupPrPolling}
-          onReviewInGitHub={onReviewSetupPR}
-        />
-      )}
+      {setupStatus === 'active' &&
+        (deploymentState === 'SetupPRCreating' ? (
+          <Box display="flex" alignItems="center" sx={{ mt: 2, mb: 2 }}>
+            <CircularProgress size={20} sx={{ mr: 2 }} />
+            <Box>
+              <Typography variant="subtitle1">{t('Creating setup PR...')}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {t('The agent is creating the setup PR to enable the Copilot agent.')}
+              </Typography>
+            </Box>
+          </Box>
+        ) : (
+          <PRStatusCard
+            title={t('Setup PR Created')}
+            description={t('Review and merge the setup PR to enable the Copilot agent.')}
+            prNumber={pipelineState.setupPr.number}
+            prUrl={pipelineState.setupPr.url}
+            prPolling={setupPrPolling}
+            onReviewInGitHub={onReviewSetupPR}
+          />
+        ))}
 
       {/* Active section: Agent working */}
-      {agentStatus === 'active' && (
-        <ActiveAgentWorking
-          pipelineState={pipelineState}
-          agentProgress={agentWorkflowProgress}
-          onReviewInGitHub={onReviewAgentIssue}
-        />
-      )}
+      {agentStatus === 'active' &&
+        (deploymentState === 'AgentTaskCreating' ? (
+          <Box display="flex" alignItems="center" sx={{ mt: 2, mb: 2 }}>
+            <CircularProgress size={20} sx={{ mr: 2 }} />
+            <Box>
+              <Typography variant="subtitle1">{t('Setting up Copilot agent...')}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {t('Creating the trigger issue for the Copilot coding agent.')}
+              </Typography>
+            </Box>
+          </Box>
+        ) : (
+          <ActiveAgentWorking
+            pipelineState={pipelineState}
+            agentProgress={agentWorkflowProgress}
+            onReviewInGitHub={onReviewAgentIssue}
+          />
+        ))}
 
       {/* Active section: Deployment PR */}
       {deployPRStatus === 'active' && (
         <PRStatusCard
-          title="Deployment PR Ready"
-          description="The agent has created the deployment PR, review the generated files and merge to start the deployment pipeline."
+          title={t('Deployment PR Ready')}
+          description={t(
+            'The agent has created the deployment PR. Review the generated files and merge to start the deployment pipeline.'
+          )}
           prNumber={pipelineState.generatedPr.number}
           prUrl={pipelineState.generatedPr.url}
           prPolling={generatedPrPolling}
@@ -508,14 +559,18 @@ export function ReviewAndMergeStep({
         <>
           {agentStatus === 'upcoming' && (
             <UpcomingSection
-              title="Copilot agent"
-              description="After merging, the Copilot agent will analyze your repo and create a deployment PR"
+              title={t('Copilot agent')}
+              description={t(
+                'After merging, the Copilot agent will analyze your repo and create a deployment PR'
+              )}
             />
           )}
           {deployPRStatus === 'upcoming' && (
             <UpcomingSection
-              title="Deployment PR"
-              description="Once agent has created deployment PR, review the generated files and merge to start the deployment pipeline"
+              title={t('Deployment PR')}
+              description={t(
+                'Once agent has created deployment PR, review the generated files and merge to start the deployment pipeline'
+              )}
             />
           )}
         </>

@@ -3,7 +3,7 @@
 
 import { Icon } from '@iconify/react';
 import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
-import { Box, Button, Drawer } from '@mui/material';
+import { Alert, Box, Button, Drawer } from '@mui/material';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAzureContext } from '../../hooks/useAzureContext';
 import { usePreviewFeatures } from '../../hooks/usePreviewFeatures';
@@ -21,7 +21,7 @@ interface ConfigurePipelineButtonProps {
 function ConfigurePipelineButton({ project, setSelectedTab }: ConfigurePipelineButtonProps) {
   const { t } = useTranslation();
   const { githubPipelines } = usePreviewFeatures();
-  const { azureContext } = useAzureContext(project.clusters?.[0]);
+  const { azureContext, error: azureContextError } = useAzureContext(project.clusters?.[0]);
   const [open, setOpen] = useState(false);
   const [wizardKey, setWizardKey] = useState(0);
   const [startedOver, setStartedOver] = useState(false);
@@ -88,13 +88,17 @@ function ConfigurePipelineButton({ project, setSelectedTab }: ConfigurePipelineB
             tenantId={azureContext.tenantId}
             onClose={handleClose}
             onCancel={handleStartOver}
-            onViewDeployment={handleViewDeployment}
+            onViewDeployment={setSelectedTab ? handleViewDeployment : undefined}
             initialRepo={
               !startedOver && pipelineStatus.isConfigured ? pipelineStatus.repos[0] : undefined
             }
             mode="configure"
             projectName={project.id}
           />
+        ) : azureContextError ? (
+          <Box sx={{ p: 3 }}>
+            <Alert severity="error">{azureContextError}</Alert>
+          </Box>
         ) : (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 8 }}>
             {t('Loading Azure context...')}
