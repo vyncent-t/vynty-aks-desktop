@@ -4,7 +4,7 @@
 1. Accessibility, security, stability, localization and many minor fixes, documented in release notes.
 2. Support for AKS Standard
 3. Support for importing existing managed namespaces into AKS desktop projects.
-4. Support for importing managed namespace into a project work when user doesn't have access to the cluster itself.
+4. Support for importing a managed namespace into a project even when the user does not have access to the cluster itself.
 
 ## Alpha Preview features
 For all these new features, please provide feedback in the GitHub issues, we want to learn from you and improve! As these are preview features only run on test clusters.
