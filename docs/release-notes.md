@@ -66,7 +66,7 @@ image-8.png
 ### Enabling the feature
 Go to Settings > Plugins ->  make sure ai-assistant plugin is enabled -> click on ai-assistant in the list of plugins -> toggle preview to enabled state. After this the ai-assistant icon should appear in the top right.
 
-Select the cluster "ashu-aks-agent-test" once you’ve opened the AI assistant.
+Select the cluster where the Agentic CLI Agent is running (for example, "<agent-cluster-name>") once you’ve opened the AI assistant.
 ![alt text](image-7.png)
 
 ### Try it out!
