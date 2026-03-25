@@ -221,7 +221,7 @@ To add existing Azure clusters you will need to sign in, this flow supports mult
 ![alt text](image-1.png)
 
 ## Adding a cluster updates
-You can add a cluster by selecting 'Add Cluster from Azure' using 'Add Cluster' and selecting the Azure Kubernetes Provider Service. You will then need to select your subscription.
+You can add a cluster by selecting 'Add Cluster from Azure' using 'Add Cluster' and selecting Azure Kubernetes Service (AKS). You will then need to select your subscription.
 ![alt text](image-2.png)
 
 
