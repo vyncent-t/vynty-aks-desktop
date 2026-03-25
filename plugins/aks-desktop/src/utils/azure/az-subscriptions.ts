@@ -204,8 +204,7 @@ export async function getLocations(subscriptionId: string): Promise<any[]> {
     throw new Error('Please log in to Azure CLI: az login');
   }
 
-  if (stderr && stderr.includes('ERROR: unrecognized arguments')) {
-    console.error('Failed to get locations:', stderr);
+  if (stderr && isAzError(stderr)) {
     throw new Error(`Failed to get locations: ${stderr}`);
   }
 

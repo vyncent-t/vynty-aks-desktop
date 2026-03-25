@@ -53,8 +53,7 @@ export async function getManagedNamespaces(options: {
 
     return [];
   } catch (error) {
-    console.error('Failed to parse managed namespaces response:', error);
-    return [];
+    throw new Error(`Failed to parse managed namespaces response: ${error}`);
   }
 }
 

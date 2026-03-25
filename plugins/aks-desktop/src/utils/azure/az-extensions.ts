@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the Apache 2.0.
 
-import { debugLog, getErrorMessage, isAzError, runCommandAsync } from './az-cli-core';
+import { debugLog, getErrorMessage, isAzError, needsRelogin, runCommandAsync } from './az-cli-core';
 
 async function isExtensionInstalled(
   extensionName: string
@@ -21,6 +21,17 @@ async function isExtensionInstalled(
     if (stderr && stderr.includes('not installed')) {
       debugLog(`[AZ-CLI] ${extensionName} extension is NOT installed`);
       return { installed: false };
+    }
+
+    if (stderr && needsRelogin(stderr)) {
+      return {
+        installed: false,
+        error: 'Authentication required. Please log in to Azure CLI: az login',
+      };
+    }
+
+    if (stderr && isAzError(stderr)) {
+      return { installed: false, error: `Failed to check extension ${extensionName}: ${stderr}` };
     }
 
     debugLog(`[AZ-CLI] ${extensionName} extension is installed`);

@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0.
 
 import { quoteForPlatform } from '../shared/quoteForPlatform';
-import { debugLog, getErrorMessage, needsRelogin, runCommandAsync } from './az-cli-core';
+import { debugLog, getErrorMessage, isAzError, needsRelogin, runCommandAsync } from './az-cli-core';
 import { checkNamespaceStatus } from './az-namespaces';
 
 export async function checkNamespaceExists(
@@ -84,10 +84,7 @@ export async function createNamespaceRoleAssignment(options: {
       };
     }
 
-    if (
-      namespaceStderr &&
-      (namespaceStderr.includes('ERROR') || namespaceStderr.includes('error'))
-    ) {
+    if (namespaceStderr && isAzError(namespaceStderr)) {
       return {
         success: false,
         stdout: namespaceStdout,
@@ -140,7 +137,7 @@ export async function createNamespaceRoleAssignment(options: {
       };
     }
 
-    if (roleStderr && (roleStderr.includes('ERROR') || roleStderr.includes('error'))) {
+    if (roleStderr && isAzError(roleStderr)) {
       return {
         success: false,
         stdout: roleStdout,
@@ -223,10 +220,7 @@ export async function verifyNamespaceAccess(options: {
       };
     }
 
-    if (
-      namespaceStderr &&
-      (namespaceStderr.includes('ERROR') || namespaceStderr.includes('error'))
-    ) {
+    if (namespaceStderr && isAzError(namespaceStderr)) {
       return {
         success: false,
         hasAccess: false,
@@ -280,7 +274,7 @@ export async function verifyNamespaceAccess(options: {
       };
     }
 
-    if (roleStderr && (roleStderr.includes('ERROR') || roleStderr.includes('error'))) {
+    if (roleStderr && isAzError(roleStderr)) {
       return {
         success: false,
         hasAccess: false,
