@@ -37,7 +37,7 @@ The AKS Desktop Troubleshooting Assistant is built into AKS Desktop and provides
 There are two options for enabling this functionality:
 1. Utilize the Azure AKS Agentic CLI Agent - (recommended for AKS), this an AI-powered tool (using Azure OpenAI/LLMs) that acts as an intelligent sidekick to diagnose, troubleshoot, and optimize AKS clusters using natural language queries. It provides root cause analysis and remediation suggestions, operating in local (CLI) or cluster-mode (via Helm/Kubernetes pods) for enhanced DevOps. Here AKS Desktop connects to the Agentic CLI Agent endpoint running in your selected cluster to send troubleshooting queries and receive AI-generated analysis.
 
-2. Utlize an existing model - AKS desktop will act as an Agent itself, providing context to your model.
+2. Utilize an existing model - AKS desktop will act as an Agent itself, providing context to your model.
 
 ### Enabling the feature
 1. Utilize the Azure AKS Agentic CLI Agent 
