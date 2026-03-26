@@ -5,8 +5,19 @@ import { useTranslation } from '@kinvolk/headlamp-plugin/lib';
 import { TextField } from '@mui/material';
 import { Box, MenuItem, Typography } from '@mui/material';
 import React from 'react';
-import type { NetworkingStepProps } from '../types';
-import { EGRESS_OPTIONS, INGRESS_OPTIONS } from '../types';
+import type { NetworkingStepProps } from '../CreateAKSProject/types';
+
+const INGRESS_OPTIONS = [
+  { value: 'AllowSameNamespace', label: 'Allow traffic within same namespace' },
+  { value: 'AllowAll', label: 'Allow all traffic' },
+  { value: 'DenyAll', label: 'Deny all traffic' },
+] as const;
+
+const EGRESS_OPTIONS = [
+  { value: 'AllowAll', label: 'Allow all traffic' },
+  { value: 'AllowSameNamespace', label: 'Allow traffic within same namespace' },
+  { value: 'DenyAll', label: 'Deny all traffic' },
+] as const;
 
 /**
  * Networking step component for ingress and egress policy configuration
