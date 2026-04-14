@@ -4,8 +4,26 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     globals: true,
-    environment: 'jsdom',
-    setupFiles: 'node_modules/@kinvolk/headlamp-plugin/config/setupTests.js',
     clearMocks: true,
+    projects: [
+      {
+        test: {
+          name: 'unit',
+          environment: 'jsdom',
+          setupFiles: 'node_modules/@kinvolk/headlamp-plugin/config/setupTests.js',
+          include: ['src/**/*.test.{ts,tsx}'],
+          exclude: ['src/**/*.guidepup.test.tsx'],
+        },
+      },
+      {
+        test: {
+          name: 'a11y',
+          environment: 'jsdom',
+          setupFiles: 'node_modules/@kinvolk/headlamp-plugin/config/setupTests.js',
+          include: ['src/**/*.guidepup.test.tsx'],
+          testTimeout: 30000,
+        },
+      },
+    ],
   },
 });

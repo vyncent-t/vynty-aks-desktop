@@ -13,6 +13,8 @@
     "storybook": "headlamp-plugin storybook",
     "storybook-build": "headlamp-plugin storybook-build",
     "test": "vitest run -c vitest.config.ts",
+    "test:unit": "vitest run -c vitest.config.ts --project unit",
+    "test:a11y": "vitest run -c vitest.config.ts --project a11y",
     "prettier": "prettier --write .",
     "i18n": "headlamp-plugin i18n"
   },
